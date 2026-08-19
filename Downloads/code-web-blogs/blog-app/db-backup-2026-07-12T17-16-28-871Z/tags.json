@@ -1,0 +1,242 @@
+[
+  {
+    "_id": "6a53c5fc107aa29d5e3587dc",
+    "slug": "linux-co-ban",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.661Z",
+    "name": "Linux cơ bản",
+    "updatedAt": "2026-07-12T16:51:08.661Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587dd",
+    "slug": "ubuntu",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.682Z",
+    "name": "Ubuntu",
+    "updatedAt": "2026-07-12T16:51:08.682Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587de",
+    "slug": "bash",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.686Z",
+    "name": "Bash",
+    "updatedAt": "2026-07-12T16:51:08.686Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587df",
+    "slug": "security",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.691Z",
+    "name": "Security",
+    "updatedAt": "2026-07-12T16:51:08.691Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e0",
+    "slug": "ung-dung",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.693Z",
+    "name": "Ứng dụng",
+    "updatedAt": "2026-07-12T16:51:08.693Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e1",
+    "slug": "centos",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.697Z",
+    "name": "CentOS",
+    "updatedAt": "2026-07-12T16:51:08.697Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e2",
+    "slug": "php",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.699Z",
+    "name": "PHP",
+    "updatedAt": "2026-07-12T16:51:08.699Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e3",
+    "slug": "nginx",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.701Z",
+    "name": "Nginx",
+    "updatedAt": "2026-07-12T16:51:08.701Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e4",
+    "slug": "databases",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.703Z",
+    "name": "Databases",
+    "updatedAt": "2026-07-12T16:51:08.703Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e5",
+    "slug": "system-tools",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.706Z",
+    "name": "System tools",
+    "updatedAt": "2026-07-12T16:51:08.706Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e6",
+    "slug": "mariadb",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.709Z",
+    "name": "MariaDB",
+    "updatedAt": "2026-07-12T16:51:08.709Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e7",
+    "slug": "mysql",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.711Z",
+    "name": "MySQL",
+    "updatedAt": "2026-07-12T16:51:08.711Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e8",
+    "slug": "storage",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.713Z",
+    "name": "Storage",
+    "updatedAt": "2026-07-12T16:51:08.713Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587e9",
+    "slug": "mongodb",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.714Z",
+    "name": "MongoDB",
+    "updatedAt": "2026-07-12T16:51:08.714Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587ea",
+    "slug": "networking",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.716Z",
+    "name": "Networking",
+    "updatedAt": "2026-07-12T16:51:08.716Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587eb",
+    "slug": "suricata",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.717Z",
+    "name": "Suricata",
+    "updatedAt": "2026-07-12T16:51:08.717Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587ec",
+    "slug": "debian",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.719Z",
+    "name": "Debian",
+    "updatedAt": "2026-07-12T16:51:08.719Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587ed",
+    "slug": "almalinux",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.722Z",
+    "name": "AlmaLinux",
+    "updatedAt": "2026-07-12T16:51:08.722Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587ee",
+    "slug": "openlitespeed",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.726Z",
+    "name": "OpenLiteSpeed",
+    "updatedAt": "2026-07-12T16:51:08.726Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587ef",
+    "slug": "docker",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.728Z",
+    "name": "Docker",
+    "updatedAt": "2026-07-12T16:51:08.728Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f0",
+    "slug": "kubernetes",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.731Z",
+    "name": "Kubernetes",
+    "updatedAt": "2026-07-12T16:51:08.731Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f1",
+    "slug": "rocky-linux",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.733Z",
+    "name": "Rocky Linux",
+    "updatedAt": "2026-07-12T16:51:08.733Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f2",
+    "slug": "logging",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.735Z",
+    "name": "Logging",
+    "updatedAt": "2026-07-12T16:51:08.735Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f3",
+    "slug": "monitoring",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.738Z",
+    "name": "Monitoring",
+    "updatedAt": "2026-07-12T16:51:08.738Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f4",
+    "slug": "cicd",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.741Z",
+    "name": "CI/CD",
+    "updatedAt": "2026-07-12T16:51:08.741Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f5",
+    "slug": "wordpress",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.743Z",
+    "name": "WordPress",
+    "updatedAt": "2026-07-12T16:51:08.743Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f6",
+    "slug": "lemp",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.745Z",
+    "name": "LEMP",
+    "updatedAt": "2026-07-12T16:51:08.745Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f7",
+    "slug": "vpn",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.747Z",
+    "name": "VPN",
+    "updatedAt": "2026-07-12T16:51:08.747Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f8",
+    "slug": "apache",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.748Z",
+    "name": "Apache",
+    "updatedAt": "2026-07-12T16:51:08.748Z"
+  },
+  {
+    "_id": "6a53c5fc107aa29d5e3587f9",
+    "slug": "email-server",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:51:08.750Z",
+    "name": "Email Server",
+    "updatedAt": "2026-07-12T16:51:08.750Z"
+  }
+]

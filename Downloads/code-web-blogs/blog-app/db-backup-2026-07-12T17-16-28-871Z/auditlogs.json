@@ -1,0 +1,334 @@
+[
+  {
+    "_id": "6a535d5b56507cf4668280c2",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: general)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "general",
+      "updatedKeys": [
+        "site_title",
+        "tagline",
+        "maintenance_mode",
+        "no_index",
+        "openai_key",
+        "google_drive_credentials",
+        "google_drive_folder_id"
+      ]
+    },
+    "createdAt": "2026-07-12T09:24:43.993Z",
+    "updatedAt": "2026-07-12T09:24:43.993Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a535e3956507cf4668280da",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: general)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "general",
+      "updatedKeys": [
+        "site_title",
+        "tagline",
+        "maintenance_mode",
+        "no_index",
+        "openai_key",
+        "google_drive_credentials",
+        "google_drive_folder_id"
+      ]
+    },
+    "createdAt": "2026-07-12T09:28:25.369Z",
+    "updatedAt": "2026-07-12T09:28:25.369Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a535e9656507cf4668280e0",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: general)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "general",
+      "updatedKeys": [
+        "site_title",
+        "tagline",
+        "maintenance_mode",
+        "no_index",
+        "openai_key",
+        "google_drive_credentials",
+        "google_drive_folder_id"
+      ]
+    },
+    "createdAt": "2026-07-12T09:29:58.298Z",
+    "updatedAt": "2026-07-12T09:29:58.298Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a535fb356507cf4668280ed",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: general)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "general",
+      "updatedKeys": [
+        "site_title",
+        "tagline",
+        "maintenance_mode",
+        "no_index",
+        "openai_key",
+        "google_drive_credentials",
+        "google_drive_folder_id",
+        "custom_header"
+      ]
+    },
+    "createdAt": "2026-07-12T09:34:43.564Z",
+    "updatedAt": "2026-07-12T09:34:43.564Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a5360e756507cf4668280f8",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: general)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "general",
+      "updatedKeys": [
+        "site_title",
+        "tagline",
+        "maintenance_mode",
+        "no_index",
+        "openai_key",
+        "google_drive_credentials",
+        "google_drive_folder_id",
+        "custom_header"
+      ]
+    },
+    "createdAt": "2026-07-12T09:39:51.129Z",
+    "updatedAt": "2026-07-12T09:39:51.129Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539a31da334316e2e013e3",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: general)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "general",
+      "updatedKeys": [
+        "site_title",
+        "tagline",
+        "maintenance_mode",
+        "no_index",
+        "openai_key",
+        "google_drive_credentials",
+        "google_drive_folder_id",
+        "custom_header",
+        "hero_title",
+        "hero_desc",
+        "newsletter_title",
+        "newsletter_desc",
+        "footer_newsletter_title",
+        "footer_newsletter_desc",
+        "footer_copyright",
+        "footer_tech",
+        "newsletter_placeholder",
+        "newsletter_btn",
+        "footer_newsletter_placeholder",
+        "footer_newsletter_btn"
+      ]
+    },
+    "createdAt": "2026-07-12T13:44:17.698Z",
+    "updatedAt": "2026-07-12T13:44:17.698Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539becda334316e2e013f2",
+    "user": "6a534d476eec04de3b7f5d1c",
+    "userName": "Hoàng Tác Giả",
+    "action": "Đăng nhập hệ thống",
+    "type": "login",
+    "status": "success",
+    "createdAt": "2026-07-12T13:51:40.070Z",
+    "updatedAt": "2026-07-12T13:51:40.070Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539e26da334316e2e0140d",
+    "user": "6a534d476eec04de3b7f5d1c",
+    "userName": "Hoàng Tác Giả",
+    "action": "Đăng nhập hệ thống",
+    "type": "login",
+    "status": "success",
+    "createdAt": "2026-07-12T14:01:10.864Z",
+    "updatedAt": "2026-07-12T14:01:10.864Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539eb7da334316e2e0141a",
+    "user": "6a534d476eec04de3b7f5d1c",
+    "userName": "Hoàng Tác Giả",
+    "action": "Đăng nhập hệ thống",
+    "type": "login",
+    "status": "success",
+    "createdAt": "2026-07-12T14:03:35.078Z",
+    "updatedAt": "2026-07-12T14:03:35.078Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539ec5da334316e2e0141c",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Đăng nhập hệ thống",
+    "type": "login",
+    "status": "success",
+    "createdAt": "2026-07-12T14:03:49.703Z",
+    "updatedAt": "2026-07-12T14:03:49.703Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539f3fda334316e2e01426",
+    "user": "6a534d476eec04de3b7f5d1c",
+    "userName": "Hoàng Tác Giả",
+    "action": "Đăng nhập hệ thống",
+    "type": "login",
+    "status": "success",
+    "createdAt": "2026-07-12T14:05:52.000Z",
+    "updatedAt": "2026-07-12T14:05:52.000Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539f57da334316e2e0142f",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Đăng nhập hệ thống",
+    "type": "login",
+    "status": "success",
+    "createdAt": "2026-07-12T14:06:15.121Z",
+    "updatedAt": "2026-07-12T14:06:15.121Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539f68da334316e2e01433",
+    "user": "6a534d476eec04de3b7f5d1c",
+    "userName": "Hoàng Tác Giả",
+    "action": "Đăng nhập hệ thống",
+    "type": "login",
+    "status": "success",
+    "createdAt": "2026-07-12T14:06:32.476Z",
+    "updatedAt": "2026-07-12T14:06:32.476Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53c2bacdf5393642db8a77",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: monetization)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "monetization",
+      "updatedKeys": [
+        "enable_ads",
+        "adsense_id",
+        "ad_header",
+        "ad_sidebar",
+        "enable_paywall",
+        "stripe_publishable",
+        "stripe_secret",
+        "enable_donation",
+        "donation_title",
+        "donation_message",
+        "donation_bank_id",
+        "donation_bank_account",
+        "donation_bank_name",
+        "donation_momo",
+        "donation_buymeacoffee"
+      ]
+    },
+    "createdAt": "2026-07-12T16:37:14.062Z",
+    "updatedAt": "2026-07-12T16:37:14.062Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53c2c5cdf5393642db8a7a",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: monetization)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "monetization",
+      "updatedKeys": [
+        "enable_ads",
+        "adsense_id",
+        "ad_header",
+        "ad_sidebar",
+        "enable_paywall",
+        "stripe_publishable",
+        "stripe_secret",
+        "enable_donation",
+        "donation_title",
+        "donation_message",
+        "donation_bank_id",
+        "donation_bank_account",
+        "donation_bank_name",
+        "donation_momo",
+        "donation_buymeacoffee"
+      ]
+    },
+    "createdAt": "2026-07-12T16:37:25.853Z",
+    "updatedAt": "2026-07-12T16:37:25.853Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53c2cfcdf5393642db8a7c",
+    "user": "6a526ef87a7052cb9d25f639",
+    "userName": "Admin User",
+    "action": "Thay đổi cấu hình hệ thống (Nhóm: monetization)",
+    "type": "system",
+    "ip": "::1",
+    "status": "success",
+    "details": {
+      "group": "monetization",
+      "updatedKeys": [
+        "enable_ads",
+        "adsense_id",
+        "ad_header",
+        "ad_sidebar",
+        "enable_paywall",
+        "stripe_publishable",
+        "stripe_secret",
+        "enable_donation",
+        "donation_title",
+        "donation_message",
+        "donation_bank_id",
+        "donation_bank_account",
+        "donation_bank_name",
+        "donation_momo",
+        "donation_buymeacoffee"
+      ]
+    },
+    "createdAt": "2026-07-12T16:37:35.089Z",
+    "updatedAt": "2026-07-12T16:37:35.089Z",
+    "__v": 0
+  }
+]

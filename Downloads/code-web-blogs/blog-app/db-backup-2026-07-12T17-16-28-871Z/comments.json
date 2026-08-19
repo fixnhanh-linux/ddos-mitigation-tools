@@ -1,0 +1,57 @@
+[
+  {
+    "_id": "6a534b71356163a97d9b37e4",
+    "post": "6a527f19bf332da043a78bba",
+    "authorName": "Nguyễn Văn A",
+    "authorEmail": "nguyenvana@gmail.com",
+    "content": "Bài viết rất hữu ích, cảm ơn ad!",
+    "status": "pending",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:08:17.429Z",
+    "updatedAt": "2026-07-12T08:08:17.429Z"
+  },
+  {
+    "_id": "6a534b71356163a97d9b37e5",
+    "post": "6a527f19bf332da043a78bba",
+    "authorName": "Trần Thị B",
+    "authorEmail": "tranthib@gmail.com",
+    "content": "Mình có một câu hỏi về phần ReactJS...",
+    "status": "approved",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:08:17.430Z",
+    "updatedAt": "2026-07-12T08:10:49.740Z"
+  },
+  {
+    "_id": "6a534b71356163a97d9b37e6",
+    "post": "6a527f19bf332da043a78bba",
+    "authorName": "Spam Bot",
+    "authorEmail": "spam@bot.com",
+    "content": "Buy cheap viagra now!!!",
+    "status": "spam",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:08:17.430Z",
+    "updatedAt": "2026-07-12T08:08:17.430Z"
+  },
+  {
+    "_id": "6a534b71356163a97d9b37e7",
+    "post": "6a527f19bf332da043a78bba",
+    "authorName": "Lê C",
+    "authorEmail": "lec@gmail.com",
+    "content": "Hay quá ad ơi",
+    "status": "approved",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:08:17.430Z",
+    "updatedAt": "2026-07-12T08:08:17.430Z"
+  },
+  {
+    "_id": "6a534c9856507cf46682807d",
+    "content": "de",
+    "authorName": "de",
+    "authorEmail": "tranquangkhai02042001@gmail.com",
+    "post": "6a527f19bf332da043a78bba",
+    "status": "approved",
+    "createdAt": "2026-07-12T08:13:12.776Z",
+    "updatedAt": "2026-07-12T08:13:20.387Z",
+    "__v": 0
+  }
+]

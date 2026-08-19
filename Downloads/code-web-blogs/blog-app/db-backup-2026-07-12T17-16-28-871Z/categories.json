@@ -1,0 +1,34 @@
+[
+  {
+    "_id": "6a53c6ad107aa29d5e3587fb",
+    "slug": "he-dieu-hanh",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:54:05.342Z",
+    "name": "Hệ điều hành",
+    "updatedAt": "2026-07-12T16:54:05.342Z"
+  },
+  {
+    "_id": "6a53c6ad107aa29d5e3587fc",
+    "slug": "may-chu-web",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:54:05.348Z",
+    "name": "Máy chủ Web",
+    "updatedAt": "2026-07-12T16:54:05.348Z"
+  },
+  {
+    "_id": "6a53c6ad107aa29d5e3587ff",
+    "slug": "mang-bao-mat",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:54:05.357Z",
+    "name": "Mạng & Bảo mật",
+    "updatedAt": "2026-07-12T16:54:05.357Z"
+  },
+  {
+    "_id": "6a53c6ad107aa29d5e358800",
+    "slug": "he-thong-giam-sat",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:54:05.359Z",
+    "name": "Hệ thống & Giám sát",
+    "updatedAt": "2026-07-12T16:54:05.359Z"
+  }
+]

@@ -1,0 +1,39 @@
+[
+  {
+    "_id": "6a5287b292c39a9dfc58f766",
+    "title": "Hướng dẫn cài đặt và cấu hình Fail2ban bảo vệ Server Linux",
+    "slug": "huong-dan-cai-dat-cau-hinh-fail2ban",
+    "excerpt": "Tìm hiểu cách cài đặt và cấu hình Fail2ban trên Ubuntu/Debian để bảo vệ máy chủ Linux của bạn khỏi các cuộc tấn công Brute Force.",
+    "content": "\n<h2>Giới thiệu về Fail2ban</h2>\n<p>Fail2ban là một công cụ phần mềm miễn phí và mã nguồn mở được thiết kế để ngăn chặn các cuộc tấn công Brute Force vào máy chủ của bạn. Nó hoạt động bằng cách quét các tệp nhật ký (log files) và cấm các địa chỉ IP có quá nhiều lần đăng nhập thất bại.</p>\n\n<img src=\"https://images.unsplash.com/photo-1555949963-aa79dcee981c?auto=format&fit=crop&q=80&w=1200\" alt=\"Server Security\" />\n\n<h2>Cài đặt Fail2ban trên Ubuntu</h2>\n<p>Để cài đặt Fail2ban trên Ubuntu hoặc Debian, bạn chỉ cần chạy lệnh sau trong Terminal:</p>\n\n<pre><code class=\"language-bash\">sudo apt update\nsudo apt install fail2ban -y</code></pre>\n\n<h2>Cấu hình cơ bản</h2>\n<p>Sau khi cài đặt, bạn nên tạo một bản sao của file cấu hình mặc định để tránh bị ghi đè khi nâng cấp phần mềm:</p>\n\n<pre><code class=\"language-bash\">sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local</code></pre>\n\n<p>Bây giờ, hãy mở file <code>jail.local</code> bằng Nano hoặc Vim để chỉnh sửa:</p>\n\n<pre><code class=\"language-bash\">sudo nano /etc/fail2ban/jail.local</code></pre>\n\n<p>Dưới đây là một ví dụ về cấu hình bảo vệ SSH cơ bản. Hãy tìm block <code>[sshd]</code> và cập nhật như sau:</p>\n\n<pre><code class=\"language-ini\">[sshd]\nenabled = true\nport    = ssh\nfilter  = sshd\nlogpath = /var/log/auth.log\nmaxretry = 3\nbantime = 3600\nfindtime = 600</code></pre>\n\n<h2>Khởi động lại dịch vụ</h2>\n<p>Sau khi đã lưu cấu hình, bạn cần khởi động lại Fail2ban để áp dụng thay đổi:</p>\n\n<pre><code class=\"language-bash\">sudo systemctl restart fail2ban\nsudo systemctl enable fail2ban</code></pre>\n\n<img src=\"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=1200\" alt=\"Terminal Command\" />\n\n<h2>Kiểm tra trạng thái</h2>\n<p>Để kiểm tra xem Fail2ban có đang hoạt động và bảo vệ SSH hay không, hãy dùng lệnh:</p>\n\n<pre><code class=\"language-bash\">sudo fail2ban-client status sshd</code></pre>\n\n<p>Hệ thống sẽ trả về số lượng IP đang bị cấm và danh sách chi tiết các IP đó. Chúc các bạn bảo mật máy chủ thành công!</p>\n  ",
+    "coverImage": "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&q=80&w=1200",
+    "published": true,
+    "createdAt": "2026-07-11T18:13:06.183Z",
+    "updatedAt": "2026-07-11T18:13:06.183Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53c730107aa29d5e358801",
+    "slug": "huong-dan-cau-hinh-monitor-grafana-prometheus",
+    "__v": 0,
+    "author": "6a526ef87a7052cb9d25f639",
+    "category": "6a53c6ad107aa29d5e358800",
+    "content": "\n<h2>1. Giới thiệu về Prometheus và Grafana</h2>\n<p><strong>Prometheus</strong> là một công cụ giám sát hệ thống và cảnh báo mã nguồn mở được phát triển bởi SoundCloud. Nó thu thập các metrics từ các mục tiêu được cấu hình ở những khoảng thời gian nhất định, đánh giá các biểu thức quy tắc (rule expressions), hiển thị kết quả và kích hoạt các cảnh báo khi một số điều kiện được thoả mãn.</p>\n<p><strong>Grafana</strong> là nền tảng mã nguồn mở hàng đầu để phân tích và giám sát dữ liệu. Nó cho phép bạn truy vấn, trực quan hóa, tạo cảnh báo và khám phá các metrics của bạn cho dù chúng được lưu trữ ở đâu. Nói cách khác, Grafana sẽ lấy dữ liệu từ Prometheus và vẽ thành các biểu đồ Dashboard tuyệt đẹp.</p>\n\n<h2>2. Cài đặt Prometheus</h2>\n<p>Để bắt đầu, chúng ta tiến hành tải và chạy Prometheus trên máy chủ Linux (Ubuntu/CentOS):</p>\n<pre><code>wget https://github.com/prometheus/prometheus/releases/download/v2.45.0/prometheus-2.45.0.linux-amd64.tar.gz\ntar xvfz prometheus-*.tar.gz\ncd prometheus-*\n./prometheus --config.file=prometheus.yml\n</code></pre>\n<p>Mặc định Prometheus sẽ chạy ở cổng <strong>9090</strong>. Bạn có thể truy cập qua trình duyệt: <code>http://your_server_ip:9090</code></p>\n\n<h2>3. Cài đặt Grafana</h2>\n<p>Tiếp theo, chúng ta cài đặt Grafana theo các bước sau:</p>\n<pre><code>sudo apt-get install -y apt-transport-https\nsudo apt-get install -y software-properties-common wget\nsudo wget -q -O /usr/share/keyrings/grafana.key https://apt.grafana.com/gpg.key\necho \"deb [signed-by=/usr/share/keyrings/grafana.key] https://apt.grafana.com stable main\" | sudo tee -a /etc/apt/sources.list.d/grafana.list\nsudo apt-get update\nsudo apt-get install grafana\nsudo systemctl start grafana-server\nsudo systemctl enable grafana-server\n</code></pre>\n<p>Grafana mặc định chạy trên cổng <strong>3000</strong>. Đăng nhập với tài khoản/mật khẩu mặc định là <code>admin/admin</code>.</p>\n\n<h2>4. Kết nối Grafana với Prometheus</h2>\n<ul>\n  <li>Truy cập Grafana Dashboard: <code>http://your_server_ip:3000</code></li>\n  <li>Vào phần <strong>Configuration > Data Sources</strong></li>\n  <li>Chọn <strong>Add data source</strong> và chọn <strong>Prometheus</strong></li>\n  <li>Tại phần HTTP URL, điền <code>http://localhost:9090</code></li>\n  <li>Kéo xuống dưới cùng và nhấn <strong>Save & Test</strong></li>\n</ul>\n\n<h2>5. Import Dashboard mẫu</h2>\n<p>Bạn không cần phải tự vẽ biểu đồ từ đầu. Grafana có sẵn cộng đồng chia sẻ Dashboard khổng lồ. \nĐể giám sát máy chủ Node, hãy tải <code>node_exporter</code> cho server và trong Grafana chọn Import Dashboard với ID là <strong>1860</strong> (Node Exporter Full).</p>\n\n<blockquote><p>Chúc bạn cấu hình hệ thống Monitor thành công! Một hệ thống vững mạnh không thể thiếu đôi mắt giám sát 24/7 của Prometheus và Grafana.</p></blockquote>\n",
+    "coverImage": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1600&auto=format&fit=crop",
+    "createdAt": "2026-07-12T16:56:16.901Z",
+    "excerpt": "Hướng dẫn chi tiết từng bước cài đặt và cấu hình hệ thống giám sát server mạnh mẽ với Prometheus và Grafana từ A-Z.",
+    "isPremium": false,
+    "published": true,
+    "publishedAt": "2026-07-12T16:56:16.900Z",
+    "status": "published",
+    "tags": [
+      "Grafana",
+      "Prometheus",
+      "Monitoring",
+      "Linux cơ bản",
+      "Ubuntu"
+    ],
+    "title": "Hướng dẫn cấu hình Monitor hệ thống với Grafana và Prometheus",
+    "updatedAt": "2026-07-12T16:56:16.901Z",
+    "views": 492
+  }
+]

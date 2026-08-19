@@ -1,0 +1,50 @@
+[
+  {
+    "_id": "6a534a090b0f05c1a707c0ff",
+    "title": "Giới thiệu (About Us)",
+    "slug": "about",
+    "content": "<p>Xin chào, đây là trang giới thiệu về blog của chúng tôi. Chúng tôi chuyên cung cấp các bài viết chất lượng cao về công nghệ.</p>",
+    "status": "published",
+    "views": 1205,
+    "author": "6a526ef87a7052cb9d25f639",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:02:17.366Z",
+    "updatedAt": "2026-07-12T08:02:17.366Z"
+  },
+  {
+    "_id": "6a534a090b0f05c1a707c100",
+    "title": "Liên hệ (Contact)",
+    "slug": "contact",
+    "content": "<p>Liên hệ với chúng tôi qua email: admin@nextblog.com hoặc số điện thoại: 0123.456.789</p>",
+    "status": "published",
+    "views": 450,
+    "author": "6a526ef87a7052cb9d25f639",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:02:17.367Z",
+    "updatedAt": "2026-07-12T08:02:17.367Z"
+  },
+  {
+    "_id": "6a534a090b0f05c1a707c101",
+    "title": "Chính sách bảo mật (Privacy Policy)",
+    "slug": "privacy",
+    "content": "<p>Chúng tôi cam kết bảo vệ thông tin cá nhân của người dùng. Các thông tin thu thập sẽ chỉ được sử dụng cho mục đích nâng cao trải nghiệm người dùng.</p>",
+    "status": "published",
+    "views": 80,
+    "author": "6a526ef87a7052cb9d25f639",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:02:17.367Z",
+    "updatedAt": "2026-07-12T08:02:17.367Z"
+  },
+  {
+    "_id": "6a534a090b0f05c1a707c102",
+    "title": "Điều khoản sử dụng (TOS)",
+    "slug": "terms",
+    "content": "<p>Vui lòng đọc kỹ các điều khoản sử dụng trước khi tham gia cộng đồng của chúng tôi.</p>",
+    "status": "draft",
+    "views": 0,
+    "author": "6a526ef87a7052cb9d25f639",
+    "__v": 0,
+    "createdAt": "2026-07-12T08:02:17.367Z",
+    "updatedAt": "2026-07-12T08:02:17.367Z"
+  }
+]

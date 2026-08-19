@@ -1,0 +1,126 @@
+================================================================================
+HƯỚNG DẪN CHI TIẾT TỪ A-Z DEPLOY WEB BLOG (NEXT.JS + MONGODB) LÊN SERVER / VPS
+(PHƯƠNG PHÁP NATIVE - KHÔNG SỬ DỤNG DOCKER)
+================================================================================
+
+Tài liệu này hướng dẫn chi tiết từng bước cách cài đặt trực tiếp Node.js, PM2 
+và MongoDB lên máy chủ (VPS) để chạy web mà không cần dùng qua Docker.
+
+--------------------------------------------------------------------------------
+PHẦN 1: CHUẨN BỊ SERVER VÀ TÊN MIỀN
+--------------------------------------------------------------------------------
+1. Thuê VPS:
+   - Thuê 1 VPS cài sẵn hệ điều hành Ubuntu 22.04 LTS.
+   - Khuyên dùng cấu hình tối thiểu 2GB RAM.
+
+2. Trỏ Tên miền (Domain):
+   - Vào nơi bạn mua tên miền, tạo 2 bản ghi (Record) loại A:
+     + Tên: @    | Giá trị: <Địa_chỉ_IP_VPS_của_bạn>
+     + Tên: www  | Giá trị: <Địa_chỉ_IP_VPS_của_bạn>
+
+3. Đăng nhập vào VPS:
+   - Mở Terminal (Mac/Linux) hoặc PowerShell (Windows) gõ lệnh:
+     ssh root@<Dia_chi_IP_VPS>
+
+--------------------------------------------------------------------------------
+PHẦN 2: CÀI ĐẶT MÔI TRƯỜNG TRÊN SERVER
+--------------------------------------------------------------------------------
+Chạy lần lượt các lệnh sau trên màn hình SSH của VPS:
+
+1. Cập nhật hệ thống:
+   sudo apt update && sudo apt upgrade -y
+
+2. Cài đặt Node.js (Bản 20):
+   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+   sudo apt install -y nodejs
+
+3. Cài đặt PM2 (Công cụ giữ cho Web luôn chạy ngầm):
+   sudo npm install -g pm2
+
+4. Cài đặt MongoDB trực tiếp lên Ubuntu:
+   sudo apt install -y gnupg curl
+   curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | \
+      sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
+   echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+   sudo apt update
+   sudo apt install -y mongodb-org
+   sudo systemctl start mongod
+   sudo systemctl enable mongod
+
+5. Cài đặt Nginx:
+   sudo apt install -y nginx
+
+--------------------------------------------------------------------------------
+PHẦN 3: ĐƯA SOURCE CODE LÊN SERVER VÀ BUILD
+--------------------------------------------------------------------------------
+*** Nếu bạn không dùng Git, hãy Copy thủ công qua FileZilla/WinSCP/MobaXterm:
+
+1. BẠN CẦN COPY NHỮNG FILE NÀO LÊN VPS?
+Hãy tạo một thư mục trống tên là `blog-app` trên VPS tại đường dẫn `/var/www/blog-app`.
+Từ máy tính của bạn, hãy COPY các thư mục và file sau đẩy lên `/var/www/blog-app`:
+
+[CẦN COPY TRỌN BỘ NHỮNG THỨ NÀY]:
+- thư mục `src`
+- thư mục `public`
+- thư mục `scripts`
+- file `package.json`
+- file `package-lock.json`
+- file `next.config.ts`
+- file `tsconfig.json`
+- file `postcss.config.mjs`
+- file `eslint.config.mjs`
+- file `.env.local` (nhớ đổi NEXTAUTH_URL thành tên miền thật trên VPS)
+
+[TUYỆT ĐỐI KHÔNG COPY NHỮNG THỨ NÀY (Bỏ ra ngoài)]:
+- KHÔNG copy thư mục `node_modules` (vì khác hệ điều hành sẽ lỗi).
+- KHÔNG copy thư mục `.next` (VPS sẽ tự build ra sau).
+- KHÔNG copy các file test/rác (vd: seed.js, check-users.js, tsconfig.tsbuildinfo, docker-compose.yml, Dockerfile...)
+
+2. Sau khi đã upload xong code lên VPS:
+   - Trong Terminal của VPS, di chuyển vào thư mục đó:
+     cd /var/www/blog-app
+   - Cài đặt thư viện:
+     npm install
+   - Tiến hành build dự án (bước này tạo ra thư mục .next mới):
+     npm run build
+
+--------------------------------------------------------------------------------
+PHẦN 4: KHỞI CHẠY BẰNG PM2
+--------------------------------------------------------------------------------
+1. Đang đứng ở thư mục /var/www/blog-app, chạy lệnh:
+   pm2 start npm --name "blog-web" -- start
+
+2. Lưu cấu hình:
+   pm2 save
+   pm2 startup
+
+--------------------------------------------------------------------------------
+PHẦN 5: CẤU HÌNH TÊN MIỀN BẰNG NGINX VÀ CÀI SSL HTTPS
+--------------------------------------------------------------------------------
+1. Tạo cấu hình Nginx:
+   sudo nano /etc/nginx/sites-available/blog
+
+2. Dán khối cấu hình sau vào (NHỚ ĐỔI TÊN MIỀN CỦA BẠN):
+server {
+    listen 80;
+    server_name ten-mien-cua-ban.com www.ten-mien-cua-ban.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+3. Kích hoạt Nginx:
+   sudo ln -s /etc/nginx/sites-available/blog /etc/nginx/sites-enabled/
+   sudo nginx -t
+   sudo systemctl restart nginx
+
+4. Cài chứng chỉ bảo mật (SSL):
+   sudo apt install certbot python3-certbot-nginx -y
+   sudo certbot --nginx -d ten-mien-cua-ban.com -d www.ten-mien-cua-ban.com
+   (Chọn Redirect khi được hỏi để chuyển HTTP sang HTTPS).

@@ -1,0 +1,162 @@
+[
+  {
+    "_id": "6a534d476eec04de3b7f5d1f",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "Chào em, bài viết về Next.js chiều nay đã xong chưa?",
+    "read": true,
+    "createdAt": "2026-07-12T07:16:07.767Z",
+    "updatedAt": "2026-07-12T07:16:07.767Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a534d476eec04de3b7f5d20",
+    "sender": "6a534d476eec04de3b7f5d1c",
+    "receiver": "6a526ef87a7052cb9d25f639",
+    "content": "Dạ, em đang dùng AI Assistant để tối ưu lại tiêu đề SEO. Khoảng 30 phút nữa em Publish nhé!",
+    "read": true,
+    "createdAt": "2026-07-12T07:46:07.830Z",
+    "updatedAt": "2026-07-12T08:17:46.327Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a534d476eec04de3b7f5d21",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "Ok chốt bài viết chiều nay nhé!",
+    "read": true,
+    "createdAt": "2026-07-12T08:01:07.832Z",
+    "updatedAt": "2026-07-12T16:13:18.012Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a534d476eec04de3b7f5d22",
+    "sender": "6a534d476eec04de3b7f5d1d",
+    "receiver": "6a526ef87a7052cb9d25f639",
+    "content": "Hình ảnh bài mới bị lỗi font rồi sếp ơi",
+    "read": true,
+    "createdAt": "2026-07-11T08:16:07.834Z",
+    "updatedAt": "2026-07-12T08:17:50.363Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a534e1c56507cf466828089",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "[IMAGE]/uploads/1783844380709_Screenshot_17.png",
+    "read": true,
+    "createdAt": "2026-07-12T08:19:40.973Z",
+    "updatedAt": "2026-07-12T16:13:18.012Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a534e3956507cf46682808a",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "😀",
+    "read": true,
+    "createdAt": "2026-07-12T08:20:09.710Z",
+    "updatedAt": "2026-07-12T16:13:18.012Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a534e9256507cf46682808e",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "😃",
+    "read": true,
+    "createdAt": "2026-07-12T08:21:38.483Z",
+    "updatedAt": "2026-07-12T16:13:18.012Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539fe0da334316e2e0143e",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1e",
+    "content": "Hi",
+    "read": false,
+    "createdAt": "2026-07-12T14:08:32.686Z",
+    "updatedAt": "2026-07-12T14:08:32.686Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539fe8da334316e2e01440",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1e",
+    "content": "sdsdsd",
+    "read": false,
+    "createdAt": "2026-07-12T14:08:40.644Z",
+    "updatedAt": "2026-07-12T14:08:40.644Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539feada334316e2e01441",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1e",
+    "content": "sdsd",
+    "read": false,
+    "createdAt": "2026-07-12T14:08:42.075Z",
+    "updatedAt": "2026-07-12T14:08:42.075Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a539febda334316e2e01442",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1e",
+    "content": "ád",
+    "read": false,
+    "createdAt": "2026-07-12T14:08:43.514Z",
+    "updatedAt": "2026-07-12T14:08:43.514Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53bd3dcdf5393642db8a2a",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "hi",
+    "read": true,
+    "createdAt": "2026-07-12T16:13:49.086Z",
+    "updatedAt": "2026-07-12T16:17:59.851Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53bde5cdf5393642db8a38",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "hi",
+    "read": true,
+    "createdAt": "2026-07-12T16:16:37.008Z",
+    "updatedAt": "2026-07-12T16:17:59.851Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53be33cdf5393642db8a3d",
+    "sender": "6a526ef87a7052cb9d25f639",
+    "receiver": "6a534d476eec04de3b7f5d1c",
+    "content": "sd",
+    "read": true,
+    "createdAt": "2026-07-12T16:17:55.692Z",
+    "updatedAt": "2026-07-12T16:17:59.851Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53be6dcdf5393642db8a47",
+    "sender": "6a534d476eec04de3b7f5d1c",
+    "receiver": "6a526ef87a7052cb9d25f639",
+    "content": "hi",
+    "read": true,
+    "createdAt": "2026-07-12T16:18:53.305Z",
+    "updatedAt": "2026-07-12T16:19:08.589Z",
+    "__v": 0
+  },
+  {
+    "_id": "6a53be70cdf5393642db8a48",
+    "sender": "6a534d476eec04de3b7f5d1c",
+    "receiver": "6a526ef87a7052cb9d25f639",
+    "content": "âs",
+    "read": true,
+    "createdAt": "2026-07-12T16:18:56.902Z",
+    "updatedAt": "2026-07-12T16:19:08.589Z",
+    "__v": 0
+  }
+]

@@ -1,0 +1,48 @@
+[
+  {
+    "_id": "6a526ef87a7052cb9d25f639",
+    "name": "Admin User",
+    "email": "admin@example.com",
+    "password": "$2b$12$Sq7CSqUoeuj7wBDV.pXs5.b5EAp0YTB0avb58mxAKUQcWJw92Dkfi",
+    "role": "admin",
+    "__v": 0,
+    "points": 10,
+    "createdAt": "2026-07-12T08:26:00.643Z",
+    "isTwoFactorEnabled": false,
+    "avatar": "",
+    "bio": "",
+    "phone": "",
+    "status": "active"
+  },
+  {
+    "_id": "6a534d476eec04de3b7f5d1c",
+    "name": "Hoàng Tác Giả",
+    "email": "author1@test.com",
+    "role": "author",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:01:19.618Z",
+    "isTwoFactorEnabled": false,
+    "password": "$2b$12$Zb.mECE2mVU34PASdTZn7eDCXwau5SdmLOUjYCjEyWjT90hx4t5fS",
+    "points": 0,
+    "avatar": "",
+    "bio": "",
+    "phone": "",
+    "status": "active"
+  },
+  {
+    "_id": "6a534d476eec04de3b7f5d1d",
+    "name": "Lan Biên Tập",
+    "email": "editor1@test.com",
+    "role": "editor",
+    "__v": 0,
+    "password": "$2b$12$p/adOY/bpRzDpthJoN4OfO4V5wxiUEIqkX/IT5RSEHFAo6ob9h41W"
+  },
+  {
+    "_id": "6a534d476eec04de3b7f5d1e",
+    "name": "Admin 2",
+    "email": "admin2@test.com",
+    "role": "admin",
+    "__v": 0,
+    "password": "$2b$12$p/adOY/bpRzDpthJoN4OfO4V5wxiUEIqkX/IT5RSEHFAo6ob9h41W"
+  }
+]

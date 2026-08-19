@@ -1,0 +1,317 @@
+[
+  {
+    "_id": "6a535d5b0d27bbccd029470d",
+    "key": "site_title",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:24:43.975Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Fix Nhanh"
+  },
+  {
+    "_id": "6a535d5b0d27bbccd029470e",
+    "key": "tagline",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:24:43.975Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Chia sẻ kiến thức công nghệ mỗi ngày"
+  },
+  {
+    "_id": "6a535d5b0d27bbccd029470f",
+    "key": "maintenance_mode",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:24:43.975Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": false
+  },
+  {
+    "_id": "6a535d5b0d27bbccd0294710",
+    "key": "no_index",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:24:43.975Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": false
+  },
+  {
+    "_id": "6a535d5b0d27bbccd0294711",
+    "key": "openai_key",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:24:43.975Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": ""
+  },
+  {
+    "_id": "6a535d5b0d27bbccd0294712",
+    "key": "google_drive_credentials",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:24:43.975Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": ""
+  },
+  {
+    "_id": "6a535d5b0d27bbccd0294713",
+    "key": "google_drive_folder_id",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:24:43.975Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": ""
+  },
+  {
+    "_id": "6a535fb30d27bbccd0294714",
+    "key": "custom_header",
+    "__v": 0,
+    "createdAt": "2026-07-12T09:34:43.558Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": ""
+  },
+  {
+    "_id": "6a539a310d27bbccd029471d",
+    "key": "hero_title",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Chào mừng đến với Tên Website"
+  },
+  {
+    "_id": "6a539a310d27bbccd029471e",
+    "key": "hero_desc",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Chưa có bài viết nào được xuất bản. Hãy đăng nhập quản trị để viết bài đầu tiên!"
+  },
+  {
+    "_id": "6a539a310d27bbccd029471f",
+    "key": "newsletter_title",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Đừng bỏ lỡ tin tức mới"
+  },
+  {
+    "_id": "6a539a310d27bbccd0294720",
+    "key": "newsletter_desc",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Đăng ký nhận bản tin hàng tuần để cập nhật những bài viết, xu hướng công nghệ mới nhất trực tiếp vào hộp thư của bạn."
+  },
+  {
+    "_id": "6a539a310d27bbccd0294721",
+    "key": "footer_newsletter_title",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Đăng ký nhận bản tin"
+  },
+  {
+    "_id": "6a539a310d27bbccd0294722",
+    "key": "footer_newsletter_desc",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Nhận những bài viết mới nhất, mẹo lập trình và tin tức công nghệ gửi trực tiếp vào hộp thư của bạn mỗi tuần."
+  },
+  {
+    "_id": "6a539a310d27bbccd0294723",
+    "key": "footer_copyright",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Tất cả bản quyền được bảo lưu."
+  },
+  {
+    "_id": "6a539a310d27bbccd0294724",
+    "key": "footer_tech",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": ""
+  },
+  {
+    "_id": "6a539a310d27bbccd0294725",
+    "key": "newsletter_placeholder",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Địa chỉ email của bạn"
+  },
+  {
+    "_id": "6a539a310d27bbccd0294726",
+    "key": "newsletter_btn",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Đăng ký"
+  },
+  {
+    "_id": "6a539a310d27bbccd0294727",
+    "key": "footer_newsletter_placeholder",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Nhập email của bạn..."
+  },
+  {
+    "_id": "6a539a310d27bbccd0294728",
+    "key": "footer_newsletter_btn",
+    "__v": 0,
+    "createdAt": "2026-07-12T13:44:17.685Z",
+    "group": "general",
+    "updatedAt": "2026-07-12T13:44:17.685Z",
+    "value": "Đăng ký"
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587cd",
+    "key": "enable_ads",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": true
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587ce",
+    "key": "adsense_id",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587cf",
+    "key": "ad_header",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d0",
+    "key": "ad_sidebar",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d1",
+    "key": "enable_paywall",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": false
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d2",
+    "key": "stripe_publishable",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d3",
+    "key": "stripe_secret",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d4",
+    "key": "enable_donation",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": false
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d5",
+    "key": "donation_title",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": "Ủng hộ tác giả"
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d6",
+    "key": "donation_message",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": "Nếu bạn thấy bài viết hữu ích, hãy mời mình một ly cà phê nhé!"
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d7",
+    "key": "donation_bank_id",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d8",
+    "key": "donation_bank_account",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587d9",
+    "key": "donation_bank_name",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587da",
+    "key": "donation_momo",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  },
+  {
+    "_id": "6a53c2ba107aa29d5e3587db",
+    "key": "donation_buymeacoffee",
+    "__v": 0,
+    "createdAt": "2026-07-12T16:37:14.049Z",
+    "group": "monetization",
+    "updatedAt": "2026-07-12T16:37:35.084Z",
+    "value": ""
+  }
+]
