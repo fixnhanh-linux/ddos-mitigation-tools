@@ -18,33 +18,47 @@ export async function POST(req: Request) {
     const openaiKey = openaiKeySetting?.value;
 
     const geminiKeySetting = await Setting.findOne({ key: 'gemini_key' }).lean();
-    const geminiKey = process.env.GEMINI_API_KEY || ""; // HARDCODED FIX
+    const geminiKey = process.env.GEMINI_API_KEY;
 
     const systemPrompt = `Bạn là một trợ lý AI hữu ích. Dưới đây là nội dung của một bài viết:
 "${context}"
 Hãy trả lời câu hỏi của độc giả dựa trên bài viết trên. Nếu câu hỏi không liên quan đến bài viết, hãy trả lời một cách lịch sự rằng bạn chỉ hỗ trợ trả lời các câu hỏi liên quan đến nội dung bài viết.`;
 
     if (aiProvider === "gemini" && geminiKey) {
-      // Dùng Google Gemini
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": geminiKey
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: question }] }],
-          system_instruction: { parts: [{ text: systemPrompt }] }
-        })
-      });
-
-      const rawText = await res.text();
+      // Dùng Google Gemini với cơ chế Retry tự động (để đối phó lỗi 503)
       let aiData;
-      try {
-        aiData = JSON.parse(rawText);
-      } catch (e) {
-        console.error("Failed to parse Gemini response:", rawText);
-        return NextResponse.json({ success: false, error: "Lỗi phản hồi từ Gemini", details: rawText });
+      let rawText = "";
+      let maxRetries = 3;
+      let attempt = 0;
+
+      while (attempt < maxRetries) {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": geminiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: question }] }],
+            system_instruction: { parts: [{ text: systemPrompt }] }
+          })
+        });
+
+        rawText = await res.text();
+        try {
+          aiData = JSON.parse(rawText);
+          // Nếu thành công hoặc là lỗi không phải 503 thì thoát vòng lặp
+          if (res.ok || (aiData.error && aiData.error.code !== 503)) {
+            break; 
+          }
+          // Nếu là lỗi 503 thì đợi 1 chút rồi thử lại
+          console.log(`[Gemini API] Bị lỗi 503, đang thử lại lần ${attempt + 1}...`);
+          await new Promise(resolve => setTimeout(resolve, 1500 * (attempt + 1))); 
+        } catch (e) {
+          console.error("Failed to parse Gemini response:", rawText);
+          return NextResponse.json({ success: false, error: "Lỗi phản hồi từ Gemini", details: rawText });
+        }
+        attempt++;
       }
 
       if (aiData.candidates && aiData.candidates.length > 0 && aiData.candidates[0].content?.parts?.[0]?.text) {
