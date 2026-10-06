@@ -1,0 +1,108 @@
+<mxfile version="21.6.8" type="device">
+  <diagram id="diagram1" name="Architecture">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- ==================== BACKGROUND CONTAINERS ==================== -->
+        <mxCell id="ZabbixInfra" value="&lt;b&gt;Zabbix Infrastructure&lt;/b&gt;" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f5f5f5;fontColor=#333333;strokeColor=#666666;startSize=30;" vertex="1" parent="1">
+          <mxGeometry x="20" y="40" width="280" height="660" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ProxmoxCluster" value="&lt;b&gt;Proxmox Cluster&lt;/b&gt;" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;startSize=30;" vertex="1" parent="1">
+          <mxGeometry x="340" y="40" width="1020" height="660" as="geometry" />
+        </mxCell>
+
+        <mxCell id="NodeMGR" value="&lt;b&gt;Proxmox Node (Ceph Manager Active)&lt;/b&gt;" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;startSize=30;" vertex="1" parent="1">
+          <mxGeometry x="370" y="90" width="460" height="570" as="geometry" />
+        </mxCell>
+
+        <mxCell id="CephCluster" value="&lt;b&gt;Ceph Cluster (Lưu trữ)&lt;/b&gt;" style="swimlane;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;startSize=30;" vertex="1" parent="1">
+          <mxGeometry x="900" y="90" width="420" height="570" as="geometry" />
+        </mxCell>
+
+        <!-- ==================== COMPONENTS ==================== -->
+        <mxCell id="ZS" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;&lt;b&gt;Zabbix Server / Proxy&lt;/b&gt;&lt;/font&gt;&lt;br&gt;&lt;br&gt;Thu thập dữ liệu, cảnh báo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="260" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ZA2" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;&lt;b&gt;Zabbix Agent 2&lt;/b&gt;&lt;/font&gt;&lt;br&gt;&lt;br&gt;Plugin Ceph tích hợp sẵn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="140" width="400" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="MGR" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;&lt;b&gt;Ceph MGR RESTful API&lt;/b&gt;&lt;/font&gt;&lt;br&gt;&lt;br&gt;Cổng: 8003 (Self-signed Cert)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bac8d3;strokeColor=#23445d;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="300" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="HealthScript" value="Bash Script:&lt;br&gt;&lt;b&gt;cephstatus.sh&lt;/b&gt;&lt;br&gt;(Chạy mỗi phút bằng cron)" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#e1d5e7;strokeColor=#9673a6;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="460" width="220" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="TextFile" value="File:&lt;br&gt;&lt;b&gt;/etc/zabbix/cephstatus.txt&lt;/b&gt;" style="shape=document;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#e1d5e7;strokeColor=#9673a6;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="640" y="465" width="160" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="MON" value="&lt;b&gt;Ceph Monitors (MON)&lt;/b&gt;&lt;br&gt;Quản lý Cluster Map" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="140" width="340" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="OSD" value="&lt;b&gt;Ceph OSDs&lt;/b&gt;&lt;br&gt;Lưu trữ dữ liệu thực tế" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="300" width="340" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="MDS" value="&lt;b&gt;Ceph MDS / RGW&lt;/b&gt;&lt;br&gt;(File System / Object Gateway)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="460" width="340" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ==================== EDGES ==================== -->
+        
+        <!-- ZS to ZA2 -->
+        <mxCell id="Edge1" value="&lt;b&gt;Giao thức Zabbix (Port 10050)&lt;/b&gt;&lt;br&gt;Active / Passive Checks" style="endArrow=classic;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;edgeStyle=orthogonalEdgeStyle;strokeWidth=2;" edge="1" parent="1" source="ZS" target="ZA2">
+          <mxGeometry x="0.0385" y="-15" width="50" height="50" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ZA2 to MGR -->
+        <mxCell id="Edge2" value="&lt;b&gt;Gọi API Lấy Dữ Liệu Ceph&lt;/b&gt;&lt;br&gt;(JSON qua HTTPS)" style="endArrow=classic;html=1;exitX=0.325;exitY=1;entryX=0.5;entryY=0;edgeStyle=orthogonalEdgeStyle;strokeWidth=2;" edge="1" parent="1" source="ZA2" target="MGR">
+          <mxGeometry width="50" height="50" relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ZA2 to TextFile -->
+        <mxCell id="Edge3" value="&lt;b&gt;system.run[*]&lt;/b&gt;&lt;br&gt;Đọc nội dung" style="endArrow=classic;dashed=1;html=1;exitX=0.8;exitY=1;entryX=0.5;entryY=0;edgeStyle=orthogonalEdgeStyle;strokeWidth=2;strokeColor=#999999;" edge="1" parent="1" source="ZA2" target="TextFile">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- HealthScript to TextFile -->
+        <mxCell id="Edge4" value="Ghi output đè&lt;br&gt;&lt;b&gt;ceph health &gt;&lt;/b&gt;" style="endArrow=classic;dashed=1;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;edgeStyle=orthogonalEdgeStyle;strokeWidth=2;strokeColor=#999999;" edge="1" parent="1" source="HealthScript" target="TextFile">
+          <mxGeometry y="-20" width="50" height="50" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- HealthScript to MON -->
+        <mxCell id="Edge5" value="Lệnh CLI:&lt;br&gt;&lt;b&gt;ceph health&lt;/b&gt;" style="endArrow=classic;dashed=1;html=1;exitX=0.5;exitY=1;entryX=0;entryY=0.5;edgeStyle=orthogonalEdgeStyle;strokeWidth=2;strokeColor=#999999;" edge="1" parent="1" source="HealthScript" target="MON">
+          <mxGeometry x="0.1014" y="-15" width="50" height="50" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="510" y="620" />
+              <mxPoint x="870" y="620" />
+              <mxPoint x="870" y="180" />
+            </Array>
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- MGR to OSD -->
+        <mxCell id="Edge6" value="&lt;b&gt;Truy vấn trạng thái nội bộ&lt;/b&gt;&lt;br&gt;(OSD, Pool, IOPS...)" style="endArrow=classic;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;edgeStyle=orthogonalEdgeStyle;strokeWidth=2;" edge="1" parent="1" source="MGR" target="OSD">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="20" as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
