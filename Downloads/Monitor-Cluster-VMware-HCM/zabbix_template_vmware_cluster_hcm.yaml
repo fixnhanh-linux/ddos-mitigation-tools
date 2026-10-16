@@ -2,10 +2,10 @@ zabbix_export:
   version: '6.0'
   date: '2026-10-17T00:00:00Z'
   groups:
-  - uuid: d1ea2541d477542392b39f0c9944890f
+  - uuid: d1ea2541d477442392b39f0c9944890f
     name: Templates/VMware
   templates:
-  - uuid: 796759aa193858d88344eeff7f8358fe
+  - uuid: 796759aa193848d88344eeff7f8358fe
     template: VMware Cluster HCM by vmware-cluster-exporter
     name: VMware Cluster HCM by vmware-cluster-exporter
     description: |-
@@ -15,7 +15,7 @@ zabbix_export:
     groups:
     - name: Templates/VMware
     items:
-    - uuid: 977be66544c554ab82d49f3275df920f
+    - uuid: 977be66544c544ab82d49f3275df920f
       name: 'Exporter: /metrics'
       type: HTTP_AGENT
       key: vmc.metrics
@@ -29,7 +29,7 @@ zabbix_export:
       tags:
       - tag: component
         value: raw
-    - uuid: 714599446e985168af2a68c9b098346f
+    - uuid: 714599446e984168af2a68c9b098346f
       name: 'Exporter: lay du lieu vCenter'
       type: DEPENDENT
       key: vmc.exporter.up
@@ -50,7 +50,7 @@ zabbix_export:
       - tag: component
         value: exporter
       triggers:
-      - uuid: 5292851a2f2f58d681db6454801d948e
+      - uuid: 5292851a2f2f48d681db6454801d948e
         expression: last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.exporter.up)=0
         name: 'Exporter: khong lay duoc du lieu tu vCenter'
         priority: HIGH
@@ -58,12 +58,12 @@ zabbix_export:
         dependencies:
         - name: 'Exporter: khong doc duoc /metrics trong {$VMC.NODATA}'
           expression: 'nodata(/VMware Cluster HCM by vmware-cluster-exporter/vmc.exporter.up,{$VMC.NODATA})=1'
-      - uuid: 2a65507583905c7daa0d2179a6923f3f
+      - uuid: 2a65507583904c7daa0d2179a6923f3f
         expression: 'nodata(/VMware Cluster HCM by vmware-cluster-exporter/vmc.exporter.up,{$VMC.NODATA})=1'
         name: 'Exporter: khong doc duoc /metrics trong {$VMC.NODATA}'
         priority: HIGH
         description: 'Kiem tra service vmware-cluster-exporter va firewall port {$VMC.PORT}'
-    - uuid: 325ce3de586455e588f79c4e6a436c41
+    - uuid: 325ce3de586445e588f79c4e6a436c41
       name: 'Exporter: lan lay du lieu thanh cong gan nhat'
       type: DEPENDENT
       key: vmc.exporter.last_success
@@ -83,14 +83,14 @@ zabbix_export:
       - tag: component
         value: exporter
       triggers:
-      - uuid: 95cfff6281d350a09d70e6a2c4c8c5cb
+      - uuid: 95cfff6281d340a09d70e6a2c4c8c5cb
         expression: 'fuzzytime(/VMware Cluster HCM by vmware-cluster-exporter/vmc.exporter.last_success,10m)=0'
         name: 'Exporter: so lieu cu hon 10 phut'
         priority: WARNING
         dependencies:
         - name: 'Exporter: khong doc duoc /metrics trong {$VMC.NODATA}'
           expression: 'nodata(/VMware Cluster HCM by vmware-cluster-exporter/vmc.exporter.up,{$VMC.NODATA})=1'
-    - uuid: 3cdae75694925bcbb638f96725a56bb3
+    - uuid: 3cdae75694924bcbb638f96725a56bb3
       name: 'Exporter: thoi gian lay du lieu'
       type: DEPENDENT
       key: vmc.exporter.duration
@@ -109,7 +109,7 @@ zabbix_export:
       tags:
       - tag: component
         value: exporter
-    - uuid: 347ad14198ac5b1ab04042bede4ec93b
+    - uuid: 347ad14198ac4b1ab04042bede4ec93b
       name: 'Exporter: phien ban'
       type: DEPENDENT
       key: vmc.exporter.version
@@ -132,7 +132,7 @@ zabbix_export:
       - tag: component
         value: exporter
     discovery_rules:
-    - uuid: af7200965b4d5e6281fbecddc07b3a9c
+    - uuid: af7200965b4d4e6281fbecddc07b3a9c
       name: Cluster discovery
       type: DEPENDENT
       key: vmc.cluster.discovery
@@ -148,7 +148,7 @@ zabbix_export:
       - lld_macro: '{#CLUSTER}'
         path: $.labels.cluster
       item_prototypes:
-      - uuid: f579aead8fff51fb939285b1073d89e3
+      - uuid: f579aead8fff41fb939285b1073d89e3
         name: 'Cluster {#CLUSTER}: Trang thai tren vCenter'
         type: DEPENDENT
         key: 'vmc.cluster.status[{#CLUSTER}]'
@@ -173,11 +173,11 @@ zabbix_export:
         valuemap:
           name: VMware color status
         trigger_prototypes:
-        - uuid: 2dea67f530ef5e2a8271a79fdacbeb26
+        - uuid: 2dea67f530ef4e2a8271a79fdacbeb26
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.status[{#CLUSTER}])=2'
           name: 'Cluster {#CLUSTER}: vCenter bao trang thai red'
           priority: AVERAGE
-      - uuid: a92072db8a845d42b96b63e52852dfd9
+      - uuid: a92072db8a844d42b96b63e52852dfd9
         name: 'Cluster {#CLUSTER}: vSAN health (tong)'
         type: DEPENDENT
         key: 'vmc.cluster.vsan.health[{#CLUSTER}]'
@@ -202,12 +202,12 @@ zabbix_export:
         valuemap:
           name: vSAN health
         trigger_prototypes:
-        - uuid: 47e1ed25609f5d66aefee1515321129a
+        - uuid: 47e1ed25609f4d66aefee1515321129a
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.health[{#CLUSTER}])=2'
           name: 'Cluster {#CLUSTER}: vSAN Skyline Health co muc red'
           priority: INFO
           description: Trang thai tong vSAN = red (co it nhat 1 muc Unhealthy). Muc canh bao chinh dua vao health score.
-      - uuid: 7b55b3b0dbd2544484b72c8f0910c43e
+      - uuid: 7b55b3b0dbd2444484b72c8f0910c43e
         name: 'Cluster {#CLUSTER}: vSAN health score'
         type: DEPENDENT
         key: 'vmc.cluster.vsan.score[{#CLUSTER}]'
@@ -230,19 +230,19 @@ zabbix_export:
           value: '{#CLUSTER}'
         description: 'Diem Cluster health score (0-100) tren vCenter > Monitor > vSAN > Skyline Health'
         trigger_prototypes:
-        - uuid: 1bcac8ca530952ed8dca2f05d036f5f3
+        - uuid: 1bcac8ca530942ed8dca2f05d036f5f3
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.score[{#CLUSTER}])<{$VMC.SCORE.CRIT:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: vSAN health score < {$VMC.SCORE.CRIT}'
           priority: HIGH
           description: 'Xem vCenter > Cluster > Monitor > vSAN > Skyline Health'
-        - uuid: 517473dc9ef3579ebc37d5f28080bb73
+        - uuid: 517473dc9ef3479ebc37d5f28080bb73
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.score[{#CLUSTER}])<{$VMC.SCORE.WARN:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: vSAN health score < {$VMC.SCORE.WARN}'
           priority: WARNING
           dependencies:
           - name: 'Cluster {#CLUSTER}: vSAN health score < {$VMC.SCORE.CRIT}'
             expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.score[{#CLUSTER}])<{$VMC.SCORE.CRIT:"{#CLUSTER}"}'
-      - uuid: 82dcf37ab5765d87b65a586c6d8918c9
+      - uuid: 82dcf37ab5764d87b65a586c6d8918c9
         name: 'Cluster {#CLUSTER}: DRS'
         type: DEPENDENT
         key: 'vmc.cluster.drs[{#CLUSTER}]'
@@ -266,11 +266,11 @@ zabbix_export:
         valuemap:
           name: VMware DRS mode
         trigger_prototypes:
-        - uuid: 1313780a72e354d48d9d4a7bda9b1a32
+        - uuid: 1313780a72e344d48d9d4a7bda9b1a32
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.drs[{#CLUSTER}])=0'
           name: 'Cluster {#CLUSTER}: DRS dang tat'
           priority: INFO
-      - uuid: 50fb114e2d565fdbbf356ee93df1ad09
+      - uuid: 50fb114e2d564fdbbf356ee93df1ad09
         name: 'Cluster {#CLUSTER}: So host'
         type: DEPENDENT
         key: 'vmc.cluster.hosts[{#CLUSTER}]'
@@ -291,7 +291,7 @@ zabbix_export:
           value: cluster
         - tag: cluster
           value: '{#CLUSTER}'
-      - uuid: ff87eda26e9f5bc5ba67995b346844ca
+      - uuid: ff87eda26e9f4bc5ba67995b346844ca
         name: 'Cluster {#CLUSTER}: So host hoat dong'
         type: DEPENDENT
         key: 'vmc.cluster.hosts.effective[{#CLUSTER}]'
@@ -312,7 +312,7 @@ zabbix_export:
           value: cluster
         - tag: cluster
           value: '{#CLUSTER}'
-      - uuid: 7f6ee2bd37165a8a849a6f167e33dcb9
+      - uuid: 7f6ee2bd37164a8a849a6f167e33dcb9
         name: 'Cluster {#CLUSTER}: Tong VM'
         type: DEPENDENT
         key: 'vmc.cluster.vms[{#CLUSTER}]'
@@ -334,7 +334,7 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         description: Ca VM dang tat
-      - uuid: 2c062fd6ca22581c94f594a86227744b
+      - uuid: 2c062fd6ca22481c94f594a86227744b
         name: 'Cluster {#CLUSTER}: VM dang tat'
         type: DEPENDENT
         key: 'vmc.cluster.vms.off[{#CLUSTER}]'
@@ -355,7 +355,7 @@ zabbix_export:
           value: cluster
         - tag: cluster
           value: '{#CLUSTER}'
-      - uuid: 1b0ab2750a765920a4baf9b9241ec194
+      - uuid: 1b0ab2750a764920a4baf9b9241ec194
         name: 'Cluster {#CLUSTER}: CPU tong'
         type: DEPENDENT
         key: 'vmc.cluster.cpu.total[{#CLUSTER}]'
@@ -377,7 +377,7 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: Hz
-      - uuid: 9b2f3335f7295308a6166076d70928e8
+      - uuid: 9b2f3335f7294308a6166076d70928e8
         name: 'Cluster {#CLUSTER}: CPU dang dung'
         type: DEPENDENT
         key: 'vmc.cluster.cpu.used[{#CLUSTER}]'
@@ -399,7 +399,7 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: Hz
-      - uuid: 4a0c2532e0b9528da0cb0a8191a54740
+      - uuid: 4a0c2532e0b9428da0cb0a8191a54740
         name: 'Cluster {#CLUSTER}: RAM tong'
         type: DEPENDENT
         key: 'vmc.cluster.mem.total[{#CLUSTER}]'
@@ -421,7 +421,7 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: B
-      - uuid: 279966378ed45f4784e160fa987bf2c3
+      - uuid: 279966378ed44f4784e160fa987bf2c3
         name: 'Cluster {#CLUSTER}: RAM dang dung'
         type: DEPENDENT
         key: 'vmc.cluster.mem.used[{#CLUSTER}]'
@@ -443,7 +443,7 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: B
-      - uuid: 14ee9cab4ae353d7b8c484f2a596a169
+      - uuid: 14ee9cab4ae343d7b8c484f2a596a169
         name: 'Cluster {#CLUSTER}: vSAN tong'
         type: DEPENDENT
         key: 'vmc.cluster.vsan.total[{#CLUSTER}]'
@@ -465,7 +465,7 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: B
-      - uuid: 638d4f93ab9050d7a12a213f0ca3d3e7
+      - uuid: 638d4f93ab9040d7a12a213f0ca3d3e7
         name: 'Cluster {#CLUSTER}: vSAN con trong'
         type: DEPENDENT
         key: 'vmc.cluster.vsan.free[{#CLUSTER}]'
@@ -487,7 +487,7 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: B
-      - uuid: 7b33a4e2c1ee53b187d3d3528849a989
+      - uuid: 7b33a4e2c1ee43b187d3d3528849a989
         name: 'Cluster {#CLUSTER}: vSAN resync'
         type: DEPENDENT
         key: 'vmc.cluster.vsan.resync.bytes[{#CLUSTER}]'
@@ -511,11 +511,11 @@ zabbix_export:
         units: B
         description: Dung luong con phai resync
         trigger_prototypes:
-        - uuid: 86fd46959baf5254b4d6e4124f48ca8d
+        - uuid: 86fd46959baf4254b4d6e4124f48ca8d
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.resync.bytes[{#CLUSTER}],{$VMC.RESYNC.TIME})>0'
           name: 'Cluster {#CLUSTER}: vSAN resync keo dai hon {$VMC.RESYNC.TIME}'
           priority: WARNING
-      - uuid: c656ef3d873452a2b88574d0503529ae
+      - uuid: c656ef3d873442a2b88574d0503529ae
         name: 'Cluster {#CLUSTER}: vSAN resync objects'
         type: DEPENDENT
         key: 'vmc.cluster.vsan.resync.objects[{#CLUSTER}]'
@@ -536,7 +536,7 @@ zabbix_export:
           value: cluster
         - tag: cluster
           value: '{#CLUSTER}'
-      - uuid: 303b854c16e951c980d4fc8e470758f5
+      - uuid: 303b854c16e941c980d4fc8e470758f5
         name: 'Cluster {#CLUSTER}: Host uptime (lau nhat)'
         type: DEPENDENT
         key: 'vmc.cluster.host.uptime.max[{#CLUSTER}]'
@@ -559,12 +559,12 @@ zabbix_export:
           value: '{#CLUSTER}'
         units: uptime
         trigger_prototypes:
-        - uuid: de7efac3de6d5bfd8a1bbcd7d51d9976
+        - uuid: de7efac3de6d4bfd8a1bbcd7d51d9976
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.uptime.max[{#CLUSTER}])>={$VMC.UPTIME.MAX:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: co host chay lau hon {$VMC.UPTIME.MAX}'
           priority: INFO
           description: Host chay lau nen duoc va loi / patch ESXi
-      - uuid: b5c1d04ede275a769ea188a4124be124
+      - uuid: b5c1d04ede274a769ea188a4124be124
         name: 'Cluster {#CLUSTER}: CPU host cao nhat'
         type: DEPENDENT
         key: 'vmc.cluster.host.cpu.max[{#CLUSTER}]'
@@ -587,18 +587,18 @@ zabbix_export:
           value: '{#CLUSTER}'
         units: '%'
         trigger_prototypes:
-        - uuid: 9cdada73fa1a5b11867cda220a031aa0
+        - uuid: 9cdada73fa1a4b11867cda220a031aa0
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: CPU host cao nhat >= {$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}%'
           priority: AVERAGE
-        - uuid: b96bc1b0f7cb55dd9d9081db3e990ef0
+        - uuid: b96bc1b0f7cb45dd9d9081db3e990ef0
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.WARN:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: CPU host cao nhat >= {$VMC.HOST.CPU.WARN:"{#CLUSTER}"}%'
           priority: WARNING
           dependencies:
           - name: 'Cluster {#CLUSTER}: CPU host cao nhat >= {$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}%'
             expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}'
-      - uuid: 165c52f3e602557780d562cdfa7e688e
+      - uuid: 165c52f3e602457780d562cdfa7e688e
         name: 'Cluster {#CLUSTER}: RAM host cao nhat'
         type: DEPENDENT
         key: 'vmc.cluster.host.mem.max[{#CLUSTER}]'
@@ -621,18 +621,18 @@ zabbix_export:
           value: '{#CLUSTER}'
         units: '%'
         trigger_prototypes:
-        - uuid: ea11b81a9890540db79dc3dced23256f
+        - uuid: ea11b81a9890440db79dc3dced23256f
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: RAM host cao nhat >= {$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}%'
           priority: AVERAGE
-        - uuid: 39eead7fa5ae56749767457a2a2eee4e
+        - uuid: 39eead7fa5ae46749767457a2a2eee4e
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.WARN:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: RAM host cao nhat >= {$VMC.HOST.MEM.WARN:"{#CLUSTER}"}%'
           priority: WARNING
           dependencies:
           - name: 'Cluster {#CLUSTER}: RAM host cao nhat >= {$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}%'
             expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}'
-      - uuid: a2e4388c4b9353f084d5b6db524dae52
+      - uuid: a2e4388c4b9343f084d5b6db524dae52
         name: 'Cluster {#CLUSTER}: CPU dang dung (%)'
         type: CALCULATED
         key: 'vmc.cluster.cpu.pused[{#CLUSTER}]'
@@ -647,18 +647,18 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         trigger_prototypes:
-        - uuid: ec5df244a39f5ab4b4e73e120982518f
+        - uuid: ec5df244a39f4ab4b4e73e120982518f
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.cpu.pused[{#CLUSTER}],5m)>={$VMC.CPU.CRIT:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: CPU dang dung >= {$VMC.CPU.CRIT:"{#CLUSTER}"}%'
           priority: HIGH
-        - uuid: 74300d64119b56778aa746554002d3b9
+        - uuid: 74300d64119b46778aa746554002d3b9
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.cpu.pused[{#CLUSTER}],5m)>={$VMC.CPU.WARN:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: CPU dang dung >= {$VMC.CPU.WARN:"{#CLUSTER}"}%'
           priority: WARNING
           dependencies:
           - name: 'Cluster {#CLUSTER}: CPU dang dung >= {$VMC.CPU.CRIT:"{#CLUSTER}"}%'
             expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.cpu.pused[{#CLUSTER}],5m)>={$VMC.CPU.CRIT:"{#CLUSTER}"}'
-      - uuid: 16c725a0870b5628ba2b32d605350bb1
+      - uuid: 16c725a0870b4628ba2b32d605350bb1
         name: 'Cluster {#CLUSTER}: RAM dang dung (%)'
         type: CALCULATED
         key: 'vmc.cluster.mem.pused[{#CLUSTER}]'
@@ -673,18 +673,18 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         trigger_prototypes:
-        - uuid: ea5847c84ce75b6bba7c1f123f707c0c
+        - uuid: ea5847c84ce74b6bba7c1f123f707c0c
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.mem.pused[{#CLUSTER}],5m)>={$VMC.MEM.CRIT:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: RAM dang dung >= {$VMC.MEM.CRIT:"{#CLUSTER}"}%'
           priority: HIGH
-        - uuid: 4983abe1609356b7a1aab522620e8ce9
+        - uuid: 4983abe1609346b7a1aab522620e8ce9
           expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.mem.pused[{#CLUSTER}],5m)>={$VMC.MEM.WARN:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: RAM dang dung >= {$VMC.MEM.WARN:"{#CLUSTER}"}%'
           priority: WARNING
           dependencies:
           - name: 'Cluster {#CLUSTER}: RAM dang dung >= {$VMC.MEM.CRIT:"{#CLUSTER}"}%'
             expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.mem.pused[{#CLUSTER}],5m)>={$VMC.MEM.CRIT:"{#CLUSTER}"}'
-      - uuid: d220f55d1184516eb92d4c42cd73dea6
+      - uuid: d220f55d1184416eb92d4c42cd73dea6
         name: 'Cluster {#CLUSTER}: vSAN da dung (%)'
         type: CALCULATED
         key: 'vmc.cluster.vsan.pused[{#CLUSTER}]'
@@ -699,11 +699,11 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         trigger_prototypes:
-        - uuid: ea8b5933238b5c4ca7389f79380579c2
+        - uuid: ea8b5933238b4c4ca7389f79380579c2
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.pused[{#CLUSTER}])>={$VMC.VSAN.CRIT:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: vSAN da dung >= {$VMC.VSAN.CRIT:"{#CLUSTER}"}%'
           priority: HIGH
-        - uuid: 4084352a64475e0fa6d1a36153a737ef
+        - uuid: 4084352a64474e0fa6d1a36153a737ef
           expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.pused[{#CLUSTER}])>={$VMC.VSAN.WARN:"{#CLUSTER}"}'
           name: 'Cluster {#CLUSTER}: vSAN da dung >= {$VMC.VSAN.WARN:"{#CLUSTER}"}%'
           priority: WARNING
@@ -711,13 +711,13 @@ zabbix_export:
           - name: 'Cluster {#CLUSTER}: vSAN da dung >= {$VMC.VSAN.CRIT:"{#CLUSTER}"}%'
             expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.vsan.pused[{#CLUSTER}])>={$VMC.VSAN.CRIT:"{#CLUSTER}"}'
       trigger_prototypes:
-      - uuid: 36e82c35dd5057878616a8aa776195cb
+      - uuid: 36e82c35dd5047878616a8aa776195cb
         expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.hosts.effective[{#CLUSTER}])<last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.hosts[{#CLUSTER}])'
         name: 'Cluster {#CLUSTER}: co host khong hoat dong'
         priority: AVERAGE
         description: 'So host effective nho hon tong so host: host disconnected / maintenance / not responding'
       graph_prototypes:
-      - uuid: 2773db3b851b5b4296e033f013ca1d1e
+      - uuid: 2773db3b851b4b4296e033f013ca1d1e
         name: 'Cluster {#CLUSTER}: tai nguyen da dung (%)'
         ymin_type_1: FIXED
         ymax_type_1: FIXED
@@ -803,7 +803,7 @@ zabbix_export:
       value: 5m
       description: 'Khong doc duoc /metrics trong khoang nay -> High'
     valuemaps:
-    - uuid: 759b8bc5e579509c8ebdef12d9d46512
+    - uuid: 759b8bc5e579409c8ebdef12d9d46512
       name: VMware color status
       mappings:
       - value: '0'
@@ -814,7 +814,7 @@ zabbix_export:
         newvalue: red
       - value: '3'
         newvalue: gray
-    - uuid: a593ecdd9109519eb32c90dfab62836a
+    - uuid: a593ecdd9109419eb32c90dfab62836a
       name: vSAN health
       mappings:
       - value: '0'
@@ -825,7 +825,7 @@ zabbix_export:
         newvalue: red
       - value: '3'
         newvalue: unknown
-    - uuid: 4107480c24565944a2007bac5cec937b
+    - uuid: 4107480c24564944a2007bac5cec937b
       name: VMware DRS mode
       mappings:
       - value: '0'
@@ -836,7 +836,7 @@ zabbix_export:
         newvalue: Partially Automated
       - value: '3'
         newvalue: Fully Automated
-    - uuid: 23d29fd0628554df970ca89852a7d3f9
+    - uuid: 23d29fd0628544df970ca89852a7d3f9
       name: Exporter up
       mappings:
       - value: '0'

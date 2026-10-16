@@ -20,7 +20,8 @@ C = "{#CLUSTER}"
 
 
 def uid(*parts):
-    return uuid.uuid5(NS, "|".join(parts)).hex
+    # Zabbix chi nhan UUIDv4: lay bam co dinh (uuid5) roi dat lai bit version=4 / variant -> import lai khong trung
+    return uuid.UUID(bytes=uuid.uuid5(NS, "|".join(parts)).bytes, version=4).hex
 
 
 def pattern(metric, labeled=True, handler="DISCARD_VALUE"):
