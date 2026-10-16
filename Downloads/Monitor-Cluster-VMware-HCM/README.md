@@ -1,7 +1,12 @@
 # VMWARE CLUSTER HCM — dashboard lưới ô theo cluster
 
 Dashboard Grafana tổng quan từng cluster VMware: mỗi cluster 1 khối gồm 15 ô màu
-(xanh = tốt, cam = cảnh báo, đỏ = lỗi), tự nhân bản theo biến **Cluster**, 3 cluster / hàng.
+(xanh = tốt, cam = cảnh báo, đỏ = lỗi), cố định 4 cột × 4 hàng (ô Cluster Status rộng gấp đôi), 3 cluster / hàng.
+
+Danh sách cluster nằm trong `CLUSTERS` của `make_dashboard.py` (tên đúng như trên vCenter):
+`CORE`, `POOL17`, `POOL18-XD`, `POOL23`, `POOL25`, `VC1_POOL6`. POOL23 hiện chưa có trong exporter nào
+(9811–9814 chỉ thấy 5 cluster trên) nên khối POOL23 sẽ hiện "–" cho tới khi có vCenter chứa nó.
+Thêm/bớt/đổi tên cluster: sửa `CLUSTERS`, chạy `python make_dashboard.py`, import lại (Overwrite).
 
 Bộ này **tách riêng hoàn toàn** khỏi bộ cũ *MONITOR RESOURCE HOST ESXi* (`esxi-host-exporter`):
 exporter, service, thư mục, user, port, metric, scrape job và dashboard đều có tên riêng,

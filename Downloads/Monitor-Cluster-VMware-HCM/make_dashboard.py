@@ -10,7 +10,7 @@ import os
 
 TITLE = "VMWARE CLUSTER HCM"
 DS = {"type": "prometheus", "uid": "${datasource}"}
-C = 'cluster="$cluster"'
+C = 'cluster="$cluster"'  # $cluster duoc thay bang ten tung cluster trong CLUSTERS
 
 # Nguong mau (xanh -> cam -> do). None = khong dung muc do.
 THRESHOLDS = {
@@ -80,23 +80,54 @@ def tile_override(ref, name, unit, kind):
     return {"matcher": {"id": "byFrameRefID", "options": ref}, "properties": props}
 
 
-refs = [chr(ord("A") + i) for i in range(len(TILES))]
-cluster_panel = {
-    "id": 2, "type": "stat", "title": "$cluster", "datasource": DS,
-    "repeat": "cluster", "repeatDirection": "h", "maxPerRow": 3,
-    "gridPos": {"x": 0, "y": 1, "w": 8, "h": 9},
-    "links": [{"title": "Chi tiết host của $cluster",
-               "url": "/d/esxi-host-resource/?var-cluster=$cluster&${datasource:queryparam}"}],
-    "targets": [{"datasource": DS, "refId": r, "expr": t[1], "legendFormat": t[0], "instant": True, "range": False}
-                for r, t in zip(refs, TILES)],
-    "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "noValue": "–",
-                                 "thresholds": steps((None, GREEN))},
-                    "overrides": [tile_override(r, name, unit, kind) for r, (name, _, unit, kind) in zip(refs, TILES)]},
-    "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
-                "justifyMode": "center", "orientation": "auto", "wideLayout": True,
-                "text": {"titleSize": 12, "valueSize": 13},
-                "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}},
-}
+# Ten cluster dung nhu tren vCenter (nhan cluster cua metric). Them/bot cluster: sua danh sach roi chay lai.
+CLUSTERS = ["CORE", "POOL17", "POOL18-XD", "POOL23", "POOL25", "VC1_POOL6"]
+PER_ROW = 3          # so cluster moi hang
+TILE_W, TILE_H = 2, 3  # 1 o = 2/24 chieu ngang -> 4 o / cluster / hang
+# Bo cuc 1 cluster (4 cot x 4 hang): Cluster Status rong gap doi, 14 o con lai moi o 1 cot
+WIDTHS = [2] + [1] * (len(TILES) - 1)
+
+
+def tile_panel(pid, cluster, x, y, w, tile):
+    name, expr, unit, kind = tile
+    props = tile_override("A", name, unit, kind)["properties"]
+    defaults = {"color": {"mode": "thresholds"}, "noValue": "–"}
+    for prop in props:
+        defaults[prop["id"]] = prop["value"]
+    return {
+        "id": pid, "type": "stat", "title": "", "datasource": DS, "transparent": False,
+        "gridPos": {"x": x, "y": y, "w": w, "h": TILE_H},
+        "targets": [{"datasource": DS, "refId": "A", "expr": expr.replace("$cluster", cluster),
+                     "legendFormat": name, "instant": True, "range": False}],
+        "fieldConfig": {"defaults": defaults, "overrides": []},
+        "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name",
+                    "justifyMode": "center", "orientation": "auto", "wideLayout": True,
+                    "text": {"titleSize": 12, "valueSize": 16},
+                    "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}},
+    }
+
+
+panels = [{"id": 1, "type": "row", "title": TITLE, "collapsed": False,
+           "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}, "panels": []}]
+block_w = 24 // PER_ROW
+block_h = 1 + TILE_H * 4
+pid = 2
+for i, cluster in enumerate(CLUSTERS):
+    bx, by = (i % PER_ROW) * block_w, 1 + (i // PER_ROW) * block_h
+    panels.append({  # thanh tieu de cua cluster (chi co title + link sang dashboard host)
+        "id": pid, "type": "text", "title": cluster, "transparent": True,
+        "gridPos": {"x": bx, "y": by, "w": block_w, "h": 1},
+        "links": [{"title": "Chi tiết host của " + cluster,
+                   "url": "/d/esxi-host-resource/?var-cluster=%s&${datasource:queryparam}" % cluster}],
+        "options": {"mode": "markdown", "content": ""}})
+    pid += 1
+    col, row = 0, 0
+    for tile, w in zip(TILES, WIDTHS):
+        if col + w > 4:
+            col, row = 0, row + 1
+        panels.append(tile_panel(pid, cluster, bx + col * TILE_W, by + 1 + row * TILE_H, w * TILE_W, tile))
+        pid += 1
+        col += w
 
 dash = {
     "title": TITLE, "uid": "vmware-cluster-hcm", "tags": ["vmware", "vsan", "cluster", "vmware-cluster-exporter"],
@@ -106,14 +137,9 @@ dash = {
     "templating": {"list": [
         {"name": "datasource", "label": "Prometheus", "type": "datasource", "query": "prometheus",
          "current": {}, "refresh": 1},
-        {"name": "cluster", "label": "Cluster", "type": "query", "datasource": DS,
-         "query": {"query": "label_values(vmware_cluster_hosts, cluster)", "refId": "PrometheusVariableQueryEditor-VariableQuery"},
-         "definition": "label_values(vmware_cluster_hosts, cluster)", "refresh": 2, "sort": 1,
-         "multi": True, "includeAll": True, "current": {"selected": True, "text": "All", "value": "$__all"}},
     ]},
     "annotations": {"list": []},
-    "panels": [{"id": 1, "type": "row", "title": TITLE, "collapsed": False,
-                "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}, "panels": []}, cluster_panel],
+    "panels": panels,
 }
 
 here = os.path.dirname(os.path.abspath(__file__))
@@ -121,4 +147,4 @@ for out in (os.path.join(here, "vmware_cluster_hcm_grafana.json"),
             os.path.join(here, "vmware-cluster-exporter", "vmware_cluster_hcm_grafana.json")):
     with open(out, "w", encoding="utf-8") as f:
         json.dump(dash, f, ensure_ascii=False, indent=2)
-    print("Da ghi", out, "-", len(TILES), "o / cluster")
+    print("Da ghi", out, "-", len(CLUSTERS), "cluster x", len(TILES), "o")
