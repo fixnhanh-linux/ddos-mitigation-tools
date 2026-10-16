@@ -1,0 +1,15 @@
+# Chep vao /etc/prometheus/scrape_configs/vmware-cluster.yml (cung cho voi esxi-host-resource.yml).
+# Neu prometheus.yml liet ke tung file thi them file nay vao scrape_config_files.
+scrape_configs:
+  - job_name: vmware_cluster
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    static_configs:
+      - targets: ['10.16.16.38:9821']
+        labels: {site: HCM, pool: pool18}
+      - targets: ['10.16.16.38:9822']
+        labels: {site: HCM, pool: pool25}
+      - targets: ['10.16.16.38:9823']
+        labels: {site: HCM, pool: pool6}
+      - targets: ['10.16.16.38:9824']
+        labels: {site: HCM, pool: core}

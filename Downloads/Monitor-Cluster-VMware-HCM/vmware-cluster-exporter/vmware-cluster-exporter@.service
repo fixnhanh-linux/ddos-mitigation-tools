@@ -1,0 +1,24 @@
+[Unit]
+Description=VMware cluster exporter - dashboard VMWARE CLUSTER HCM (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Cau hinh tung instance: /etc/vmware-cluster-exporter/<ten>.env (VC, VC_USER, CLUSTER, PORT, INTERVAL, VC_PASS)
+EnvironmentFile=/etc/vmware-cluster-exporter/%i.env
+Environment=PYTHONPATH=/opt/vmware-cluster-exporter/vendor
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/env python3 /opt/vmware-cluster-exporter/vmware_cluster_exporter.py ${VC} ${VC_USER} ${CLUSTER} ${PORT} ${INTERVAL}
+User=vmware-cluster
+Group=vmware-cluster
+Restart=always
+RestartSec=30
+# Ma thoat 3 = sai mat khau vCenter -> khong tu chay lai (tranh khoa tai khoan)
+RestartPreventExitStatus=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
