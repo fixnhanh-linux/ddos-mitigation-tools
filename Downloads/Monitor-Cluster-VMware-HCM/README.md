@@ -156,3 +156,38 @@ chạy `python make_dashboard.py`, import lại (Overwrite).
 | Ram Total / Used | 10,73 TB / 67,5% | 14,97 TB / 69,1% |
 | vSAN Total / Used / Free | 132,7 TiB / 62,2% / 50,1 TiB | 165,9 TiB / 60,8% / 65,1 TiB |
 | Host Uptime / CPU Max / RAM Max | 185 d / 41,8% / 78,8% | 122 d / 38,3% / 83,9% |
+
+## Zabbix 6.0 — template `VMware Cluster HCM by vmware-cluster-exporter`
+
+File `zabbix_template_vmware_cluster_hcm.yaml` (sinh bằng `python make_zabbix_template.py`). Zabbix đọc thẳng
+`/metrics` của exporter bằng HTTP agent, không cần mật khẩu vCenter trong Zabbix.
+
+1. Data collection → Templates → Import → chọn file YAML → Import.
+2. Tạo 4 host (mỗi instance exporter 1 host), interface Agent IP `10.16.16.38`, gắn template, đặt macro `{$VMC.PORT}`:
+
+| Host | `{$VMC.PORT}` | Cluster tự phát hiện |
+|---|---|---|
+| VMware cluster pool18 | 9821 | POOL17, POOL18-XD |
+| VMware cluster pool25 | 9822 | POOL25 |
+| VMware cluster pool6 | 9823 | VC1_POOL6 |
+| VMware cluster core | 9824 | CORE |
+
+3. Zabbix server (hoặc proxy) phải mở được TCP 9821–9824 tới 10.16.16.38.
+
+Item chính `vmc.metrics` (1 phút, không lưu lịch sử) → các item phụ thuộc; LLD `vmc.cluster.discovery` tạo
+19 item + 3 item tính % cho mỗi cluster, 1 graph tài nguyên %.
+
+| Trigger | Mức | Macro (mặc định) |
+|---|---|---|
+| vSAN health score < ngưỡng | High / Warning | `{$VMC.SCORE.CRIT}` 60 · `{$VMC.SCORE.WARN}` 80 |
+| CPU cluster dùng ≥ (min 5 phút) | High / Warning | `{$VMC.CPU.CRIT}` 50 · `{$VMC.CPU.WARN}` 20 |
+| RAM cluster dùng ≥ (min 5 phút) | High / Warning | `{$VMC.MEM.CRIT}` 90 · `{$VMC.MEM.WARN}` 80 |
+| vSAN đã dùng ≥ | High / Warning | `{$VMC.VSAN.CRIT}` 80 · `{$VMC.VSAN.WARN}` 70 |
+| CPU / RAM host cao nhất ≥ (min 5 phút) | Average / Warning | `{$VMC.HOST.CPU.*}` 35/30 · `{$VMC.HOST.MEM.*}` 80/76 |
+| vSAN resync kéo dài | Warning | `{$VMC.RESYNC.TIME}` 30m |
+| Có host không hoạt động (effective < tổng) | Average | — |
+| vCenter báo cluster red | Average | — |
+| vSAN Skyline có mục red · DRS tắt · host chạy lâu | Info | `{$VMC.UPTIME.MAX}` 180d |
+| Exporter không lấy được dữ liệu vCenter / không đọc được /metrics / số liệu cũ > 10 phút | High / High / Warning | `{$VMC.NODATA}` 5m |
+
+Đổi ngưỡng riêng 1 cluster bằng macro context trên host, ví dụ `{$VMC.HOST.CPU.CRIT:"POOL17"}` = 60.
