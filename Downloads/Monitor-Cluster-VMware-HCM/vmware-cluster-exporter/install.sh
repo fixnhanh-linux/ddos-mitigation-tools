@@ -56,6 +56,19 @@ if [ -z "${VC_PASS:-}" ]; then
   fi
 fi
 
+# InfluxDB 2.x (tuy chon). Da co cau hinh cu -> giu nguyen, khong hoi lai.
+if [ -z "${INFLUX_URL:-}" ] && ! { [ -f "$ENV_FILE" ] && grep -q '^INFLUX_URL=' "$ENV_FILE"; }; then
+  read -r -p "URL InfluxDB 2.x, vd http://10.16.16.x:8086 (Enter = khong day len InfluxDB): " INFLUX_URL
+fi
+if [ -n "${INFLUX_URL:-}" ]; then
+  ask INFLUX_ORG    "InfluxDB org" ""
+  ask INFLUX_BUCKET "InfluxDB bucket" "vmware"
+  if [ -z "${INFLUX_TOKEN:-}" ]; then
+    read -r -s -p "InfluxDB token (quyen write bucket $INFLUX_BUCKET): " INFLUX_TOKEN; echo
+    [ -n "$INFLUX_TOKEN" ] || die "token InfluxDB khong duoc de trong"
+  fi
+fi
+
 echo "-> Chep chuong trinh vao $APP"
 install -d -m 755 "$APP" "$APP/vendor"
 install -m 644 "$SRC/app/vmware_cluster_exporter.py" "$APP/"
@@ -104,7 +117,13 @@ umask 077
   if [ -n "$OLD_PASS_LINE" ]; then echo "$OLD_PASS_LINE"; else echo "VC_PASS=$(quote "$VC_PASS")"; fi
   echo "# Chu ky lay vSAN Skyline Health (giay):"
   echo "#VC_SLOW_INTERVAL=300"
-  if [ -n "$OLD_INFLUX" ]; then
+  if [ -n "${INFLUX_URL:-}" ]; then
+    echo "# Day metric len InfluxDB 2.x:"
+    echo "INFLUX_URL=$(quote "$INFLUX_URL")"
+    echo "INFLUX_ORG=$(quote "$INFLUX_ORG")"
+    echo "INFLUX_BUCKET=$(quote "$INFLUX_BUCKET")"
+    echo "INFLUX_TOKEN=$(quote "$INFLUX_TOKEN")"
+  elif [ -n "$OLD_INFLUX" ]; then
     echo "# Day metric len InfluxDB:"
     echo "$OLD_INFLUX"
   else
@@ -145,6 +164,8 @@ if [ -n "$ok" ]; then
   echo "OK - exporter dang chay."
   echo "   Prometheus : http://${IP:-<ip-may-nay>}:$PORT/metrics"
   echo "   Log        : journalctl -u $SVC@$NAME -f"
+  grep -q '^INFLUX_URL=' "$ENV_FILE" \
+    && echo "   InfluxDB   : journalctl -u $SVC@$NAME | grep InfluxDB   (phai thay 'da gui ... dong')"
   echo "   Go cai dat : sudo $APP/uninstall.sh $NAME   (bo ten = go tat ca)"
   echo "   Mo firewall neu can: ufw allow $PORT/tcp   |   firewall-cmd --add-port=$PORT/tcp --permanent && firewall-cmd --reload"
 elif systemctl is-active --quiet "$SVC@$NAME"; then
