@@ -10,6 +10,11 @@ Cach dung:
   cluster = "-" -> lay tat ca cluster cua vCenter.
   VC_SLOW_INTERVAL=300 -> chu ky lay vSAN Skyline Health (vCenter chi cap nhat theo cache).
 
+Day them len InfluxDB (tuy chon, song song voi /metrics cho Prometheus):
+  InfluxDB 2.x: INFLUX_URL=http://ip:8086 INFLUX_TOKEN=... INFLUX_ORG=... INFLUX_BUCKET=vmware
+  InfluxDB 1.x: INFLUX_URL=http://ip:8086 INFLUX_DB=vmware [INFLUX_USER=... INFLUX_PASSWORD=...]
+  Moi metric -> 1 measurement cung ten, nhan -> tag (them tag vcenter), gia tri -> field "value".
+
 Metric xuat ra (nhan cluster):
   vmware_cluster_status, _vsan_health, _drs_mode, _hosts, _hosts_effective, _vms_total, _vms_powered_off,
   vmware_cluster_cpu_total_hz, _cpu_used_hz, _mem_total_bytes, _mem_used_bytes,
@@ -17,12 +22,15 @@ Metric xuat ra (nhan cluster):
   vmware_cluster_host_uptime_max_seconds, _host_cpu_max_percent, _host_mem_max_percent,
   vmware_cluster_exporter_up / _build_info / _last_success_timestamp_seconds / _collect_duration_seconds
 """
+import base64
 import getpass
 import os
+import re
 import ssl
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,7 +39,7 @@ from pyVim.connect import Disconnect, SmartConnect
 from pyVmomi import SoapStubAdapter, VmomiSupport, vim, vmodl
 
 # Tang moi lan phat hanh goi zip; kiem tra ban dang chay: curl -s localhost:9821/metrics | grep build_info
-VERSION = "2026.10.16-1"
+VERSION = "2026.10.16-2"
 
 SLOW_INTERVAL = int(os.environ.get("VC_SLOW_INTERVAL", 300))
 
@@ -223,6 +231,57 @@ def prometheus_text(state):
     return "\n".join(lines) + "\n"
 
 
+INFLUX = {k: os.environ.get(k, "") for k in ("INFLUX_URL", "INFLUX_TOKEN", "INFLUX_ORG", "INFLUX_BUCKET",
+                                             "INFLUX_DB", "INFLUX_USER", "INFLUX_PASSWORD")}
+_SAMPLE = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(.*)\})? (\S+)$')
+_LABEL = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"')
+
+
+def _tag_escape(v):
+    return v.replace("\\", "\\\\").replace(",", "\\,").replace("=", "\\=").replace(" ", "\\ ")
+
+
+def influx_lines(prom_text, ts, extra_tags):
+    """Chuyen Prometheus text -> InfluxDB line protocol (precision = giay)."""
+    out = []
+    for line in prom_text.splitlines():
+        m = _SAMPLE.match(line)
+        if not m:
+            continue
+        name, labels, value = m.groups()
+        try:
+            v = float(value)
+        except ValueError:
+            continue
+        if v != v or v in (float("inf"), float("-inf")):  # bo NaN/Inf: Influx khong nhan
+            continue
+        tags = dict(extra_tags)
+        for k, raw in _LABEL.findall(labels or ""):
+            tags[k] = raw.replace('\\"', '"').replace("\\\\", "\\")
+        tag_txt = ",".join("%s=%s" % (k, _tag_escape(str(t))) for k, t in sorted(tags.items()) if t)  # bo tag rong
+        out.append("%s%s value=%r %d" % (name, "," + tag_txt if tag_txt else "", v, ts))
+    return out
+
+
+def push_influx(prom_text, ts, extra_tags):
+    """Gui 1 lan toan bo metric. Tra ve so dong da gui; loi thi raise de vong lap ghi log."""
+    base = INFLUX["INFLUX_URL"].rstrip("/")
+    headers = {"Content-Type": "text/plain; charset=utf-8"}
+    if INFLUX["INFLUX_BUCKET"]:  # InfluxDB 2.x
+        url = "%s/api/v2/write?%s" % (base, urllib.parse.urlencode(
+            {"org": INFLUX["INFLUX_ORG"], "bucket": INFLUX["INFLUX_BUCKET"], "precision": "s"}))
+        headers["Authorization"] = "Token " + INFLUX["INFLUX_TOKEN"]
+    else:  # InfluxDB 1.x
+        url = "%s/write?%s" % (base, urllib.parse.urlencode({"db": INFLUX["INFLUX_DB"] or "vmware", "precision": "s"}))
+        if INFLUX["INFLUX_USER"]:
+            cred = base64.b64encode(("%s:%s" % (INFLUX["INFLUX_USER"], INFLUX["INFLUX_PASSWORD"])).encode()).decode()
+            headers["Authorization"] = "Basic " + cred
+    lines = influx_lines(prom_text, ts, extra_tags)
+    req = urllib.request.Request(url, data="\n".join(lines).encode("utf-8"), headers=headers)
+    urllib.request.urlopen(req, timeout=20, context=ssl._create_unverified_context()).read()
+    return len(lines)
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
@@ -245,6 +304,15 @@ def main():
                 with lock:
                     state.update(clusters=cl, up=1, last_success=int(time.time()), duration=round(time.time() - t0, 2))
                 print("[%s] OK: %d cluster (%.1fs)" % (time.strftime("%H:%M:%S"), len(cl), time.time() - t0), flush=True)
+                if INFLUX["INFLUX_URL"]:
+                    try:  # loi InfluxDB khong anh huong /metrics
+                        with lock:
+                            text, ts = prometheus_text(state), state["last_success"]
+                        n = push_influx(text, ts, {"vcenter": vc})
+                        print("[%s] InfluxDB: da gui %d dong" % (time.strftime("%H:%M:%S"), n), flush=True)
+                    except Exception as e:
+                        detail = e.read().decode("utf-8", "replace")[:200] if hasattr(e, "read") else ""
+                        print("[%s] InfluxDB LOI: %s %s" % (time.strftime("%H:%M:%S"), e, detail), flush=True)
             except vim.fault.InvalidLogin:
                 print("Dang nhap that bai: sai user hoac mat khau. Dung exporter.", flush=True)
                 os._exit(3)  # ma 3 = sai mat khau; systemd RestartPreventExitStatus=3 -> khong thu lai, tranh khoa tai khoan

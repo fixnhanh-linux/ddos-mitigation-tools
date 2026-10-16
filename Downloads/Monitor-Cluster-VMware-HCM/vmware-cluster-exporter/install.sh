@@ -80,6 +80,10 @@ OLD_PASS_LINE=""
 if [ -z "$VC_PASS" ] && [ -f "$ENV_FILE" ]; then
   OLD_PASS_LINE=$(grep '^VC_PASS=' "$ENV_FILE")
 fi
+OLD_INFLUX=""
+if [ -f "$ENV_FILE" ]; then
+  OLD_INFLUX=$(grep '^INFLUX_' "$ENV_FILE" || true)   # chay lai install.sh khong lam mat cau hinh InfluxDB
+fi
 quote() {  # dua gia tri vao EnvironmentFile cua systemd an toan voi moi ky tu dac biet
   local s=$1
   if [[ "$s" != *"'"* ]]; then
@@ -100,6 +104,17 @@ umask 077
   if [ -n "$OLD_PASS_LINE" ]; then echo "$OLD_PASS_LINE"; else echo "VC_PASS=$(quote "$VC_PASS")"; fi
   echo "# Chu ky lay vSAN Skyline Health (giay):"
   echo "#VC_SLOW_INTERVAL=300"
+  if [ -n "$OLD_INFLUX" ]; then
+    echo "# Day metric len InfluxDB:"
+    echo "$OLD_INFLUX"
+  else
+    echo "# Day metric len InfluxDB 2.x (bo # 4 dong duoi roi restart instance):"
+    echo "#INFLUX_URL='http://10.16.16.x:8086'"
+    echo "#INFLUX_ORG='fpt'"
+    echo "#INFLUX_BUCKET='vmware'"
+    echo "#INFLUX_TOKEN='<token co quyen write bucket>'"
+    echo "# InfluxDB 1.x: INFLUX_URL + INFLUX_DB (+ INFLUX_USER, INFLUX_PASSWORD)"
+  fi
 } > "$ENV_FILE"
 chmod 600 "$ENV_FILE"; chown root:root "$ENV_FILE"
 umask 022

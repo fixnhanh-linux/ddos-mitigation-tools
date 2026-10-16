@@ -22,7 +22,7 @@ Exporter mới chỉ lấy số liệu cấp cluster (không lấy disk health, 
 
 | File | Dùng để |
 |---|---|
-| `vmware-cluster-exporter-linux.zip` + `.sha256` | Gói cài exporter mới (bản 2026.10.16-1) |
+| `vmware-cluster-exporter-linux.zip` + `.sha256` | Gói cài exporter mới (bản 2026.10.16-2) |
 | `vmware_cluster_hcm_grafana.json` | Dashboard để import vào Grafana (cũng có trong gói zip) |
 | `vmware-cluster-exporter/` | Mã nguồn gói: exporter, install/uninstall, systemd unit, scrape config |
 | `make_dashboard.py` | Sinh lại dashboard khi đổi ngưỡng màu / thứ tự ô |
@@ -68,6 +68,32 @@ promtool check config /etc/prometheus/prometheus.yml && systemctl reload prometh
 
 Nếu `prometheus.yml` liệt kê từng file thay vì `scrape_configs/*.yml`, thêm `vmware-cluster.yml` vào
 `scrape_config_files`. Sửa nhãn `site`/`pool` trong file cho giống `esxi-host-resource.yml` nếu cần.
+
+## 2a. Đẩy thêm lên InfluxDB 2.x (tuỳ chọn)
+
+Exporter vẫn phục vụ `/metrics` cho Prometheus (dashboard đọc từ Prometheus), đồng thời sau mỗi vòng lấy dữ liệu
+gửi toàn bộ metric lên InfluxDB: mỗi metric → 1 measurement cùng tên (vd `vmware_cluster_cpu_used_hz`),
+nhãn → tag (`cluster`, `vcenter`), giá trị → field `value`, precision giây. Khoảng 20 dòng / cluster / phút.
+
+Bỏ dấu `#` các dòng INFLUX trong `/etc/vmware-cluster-exporter/<instance>.env`, điền token (quyền write bucket),
+rồi restart instance. Chạy lại `install.sh` sẽ giữ nguyên các dòng INFLUX đã điền.
+
+```bash
+INFLUX_URL='http://10.16.16.x:8086'
+INFLUX_ORG='fpt'
+INFLUX_BUCKET='vmware'
+INFLUX_TOKEN='<token co quyen write bucket>'
+```
+
+```bash
+systemctl restart vmware-cluster-exporter@pool18
+journalctl -u vmware-cluster-exporter@pool18 -f     # phai thay "InfluxDB: da gui ... dong"
+```
+
+Lỗi InfluxDB (sai token, mất kết nối…) chỉ ghi log `InfluxDB LOI`, không ảnh hưởng `/metrics`.
+Truy vấn mẫu (Flux):
+`from(bucket:"vmware") |> range(start:-1h) |> filter(fn:(r)=> r._measurement=="vmware_cluster_hosts" and r.cluster=="POOL17")`.
+InfluxDB 1.x: thay 4 dòng trên bằng `INFLUX_URL` + `INFLUX_DB` (+ `INFLUX_USER`, `INFLUX_PASSWORD`).
 
 ## 2b. Import dashboard
 

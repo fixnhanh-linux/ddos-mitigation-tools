@@ -13,6 +13,8 @@ Cài song song với `esxi-host-exporter` — không dùng chung thư mục, ser
 | Metric | `vmware_cluster_*` | `esxi_host_*`, `esxi_vsan_*`, `vsan_disk_*` |
 | Dashboard | VMWARE CLUSTER HCM (`vmware-cluster-hcm`) | MONITOR RESOURCE HOST ESXi |
 
+Tuỳ chọn đẩy thêm lên InfluxDB 2.x/1.x: điền các dòng `INFLUX_*` trong file `.env` (xem README chính, mục 2a).
+
 Cài:  `sudo ./install.sh` (hỏi từng thông tin, mật khẩu vCenter nhập tay).
 Gỡ:   `sudo /opt/vmware-cluster-exporter/uninstall.sh [tên]` — chỉ gỡ bộ mới.
 
