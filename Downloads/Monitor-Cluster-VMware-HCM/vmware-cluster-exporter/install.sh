@@ -73,8 +73,15 @@ echo "-> Chep chuong trinh vao $APP"
 install -d -m 755 "$APP" "$APP/vendor"
 install -m 644 "$SRC/app/vmware_cluster_exporter.py" "$APP/"
 install -m 755 "$SRC/uninstall.sh" "$APP/uninstall.sh"
+# pyVmomi moi (vendor/) can Python >= 3.10; Python 3.8-3.9 dung pyVmomi 8.0.3 (vendor-py38/)
+VENDOR_SRC="$SRC/vendor"
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+  VENDOR_SRC="$SRC/vendor-py38"
+  echo "   Python $(python3 -V 2>&1 | cut -d' ' -f2) < 3.10 -> dung pyVmomi 8.0.3 (vendor-py38)"
+fi
+[ -d "$VENDOR_SRC" ] || die "thieu thu muc $VENDOR_SRC trong goi"
 rm -rf "$APP/vendor"/*
-cp -r "$SRC/vendor/." "$APP/vendor/"
+cp -r "$VENDOR_SRC/." "$APP/vendor/"
 chmod -R a+rX "$APP"
 
 echo "-> Kiem tra thu vien pyVmomi"

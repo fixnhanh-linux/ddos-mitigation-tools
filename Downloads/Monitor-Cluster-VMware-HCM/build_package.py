@@ -4,6 +4,7 @@
 Chay:  python make_dashboard.py && python build_package.py [goi_zip_co_vendor]
 Thu vien pyVmomi (vendor/) lay tu goi esxi-host-exporter-linux.zip (mac dinh o thu muc
 "../Monitor-Healthy  Disk vCenter"), chep sang ten moi vmware-cluster-exporter/vendor/.
+vendor-py38/ (pyVmomi 8.0.3.0.1 + six 1.16.0, cho Python 3.8-3.9) lay tu thu muc vendor-py38 canh script.
 """
 import hashlib
 import os
@@ -17,6 +18,7 @@ OUT = os.path.join(HERE, NAME + "-linux.zip")
 VENDOR_ZIP = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     HERE, "..", "Monitor-Healthy  Disk vCenter", "esxi-host-exporter-linux.zip")
 VENDOR_PREFIX = "esxi-host-exporter/vendor/"
+PY38 = os.path.join(HERE, "vendor-py38")
 
 
 def add(z, arc, data):
@@ -44,6 +46,13 @@ with zipfile.ZipFile(OUT, "w") as z:
                 n += 1
     if not n:
         sys.exit("Khong tim thay vendor/ trong " + VENDOR_ZIP)
+    # pyVmomi 8.0.3 + six cho may chi co Python 3.8-3.9 (install.sh tu chon)
+    for root, dirs, files in os.walk(PY38):
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+        for f in sorted(files):
+            p = os.path.join(root, f)
+            add(z, NAME + "/vendor-py38/" + os.path.relpath(p, PY38).replace(os.sep, "/"), open(p, "rb").read())
+            n += 1
 
 digest = hashlib.sha256(open(OUT, "rb").read()).hexdigest()
 with open(OUT + ".sha256", "w", newline="\n") as f:
