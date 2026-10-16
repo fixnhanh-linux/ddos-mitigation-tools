@@ -9,6 +9,7 @@ import json
 import os
 
 TITLE = "VMWARE CLUSTER HCM"
+PROM_DS = "prometheus-all"  # ten datasource Prometheus tren Grafana
 DS = {"type": "prometheus", "uid": "${datasource}"}
 C = 'cluster="$cluster"'  # $cluster duoc thay bang ten tung cluster trong CLUSTERS
 
@@ -140,8 +141,10 @@ dash = {
     "timezone": "browser", "editable": True, "refresh": "1m", "schemaVersion": 39, "version": 1,
     "time": {"from": "now-1h", "to": "now"},
     "templating": {"list": [
+        # Co dinh nguon PROM_DS (an o chon). Doi nguon: sua PROM_DS roi chay lai.
         {"name": "datasource", "label": "Prometheus", "type": "datasource", "query": "prometheus",
-         "current": {}, "refresh": 1},
+         "regex": "/^%s$/" % PROM_DS, "hide": 2, "refresh": 1,
+         "current": {"selected": True, "text": PROM_DS, "value": PROM_DS}},
     ]},
     "annotations": {"list": []},
     "panels": panels,

@@ -24,8 +24,14 @@
         "label": "Prometheus",
         "type": "datasource",
         "query": "prometheus",
-        "current": {},
-        "refresh": 1
+        "regex": "/^prometheus-all$/",
+        "hide": 2,
+        "refresh": 1,
+        "current": {
+          "selected": true,
+          "text": "prometheus-all",
+          "value": "prometheus-all"
+        }
       }
     ]
   },
