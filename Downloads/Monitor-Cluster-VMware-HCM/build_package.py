@@ -22,6 +22,7 @@ VENDOR_PREFIX = "esxi-host-exporter/vendor/"
 def add(z, arc, data):
     zi = zipfile.ZipInfo(arc, date_time=(2026, 10, 16, 0, 0, 0))
     zi.compress_type = zipfile.ZIP_DEFLATED
+    zi.create_system = 3  # 3 = Unix: unzip moi doc quyen file ben duoi (dong goi tren Windows mac dinh la 0)
     zi.external_attr = ((0o755 if arc.endswith(".sh") else 0o644) | 0o100000) << 16  # quyen file khi unzip tren Linux
     z.writestr(zi, data)
 
