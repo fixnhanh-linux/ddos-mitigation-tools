@@ -35,34 +35,34 @@ def ref(key):
 
 
 MACROS = [
-    ("{$VMC.PORT}", "9821", "Port cua exporter: pool18 9821, pool25 9822, pool6 9823, core 9824"),
-    ("{$VMC.SCORE.WARN}", "80", "Diem vSAN Skyline Health duoi muc nay -> Warning"),
-    ("{$VMC.SCORE.CRIT}", "60", "Diem vSAN Skyline Health duoi muc nay -> High"),
-    ("{$VMC.CPU.WARN}", "20", "CPU cluster dang dung (%) -> Warning"),
-    ("{$VMC.CPU.CRIT}", "50", "CPU cluster dang dung (%) -> High"),
-    ("{$VMC.MEM.WARN}", "80", "RAM cluster dang dung (%) -> Warning"),
-    ("{$VMC.MEM.CRIT}", "90", "RAM cluster dang dung (%) -> High"),
-    ("{$VMC.VSAN.WARN}", "70", "vSAN da dung (%) -> Warning"),
-    ("{$VMC.VSAN.CRIT}", "80", "vSAN da dung (%) -> High"),
-    ("{$VMC.HOST.CPU.WARN}", "30", "CPU (%) cua host cao nhat -> Warning"),
-    ("{$VMC.HOST.CPU.CRIT}", "35", "CPU (%) cua host cao nhat -> Average"),
-    ("{$VMC.HOST.MEM.WARN}", "76", "RAM (%) cua host cao nhat -> Warning"),
-    ("{$VMC.HOST.MEM.CRIT}", "80", "RAM (%) cua host cao nhat -> Average"),
-    ("{$VMC.UPTIME.MAX}", "180d", "Host chay lau hon muc nay -> Info (can va/patch)"),
-    ("{$VMC.RESYNC.TIME}", "30m", "vSAN resync keo dai hon muc nay -> Warning"),
-    ("{$VMC.NODATA}", "5m", "Khong doc duoc /metrics trong khoang nay -> High"),
+    ("{$VMC.PORT}", "9821", "Exporter port: pool18 9821, pool25 9822, pool6 9823, core 9824"),
+    ("{$VMC.SCORE.WARN}", "80", "vSAN Skyline Health score below this -> Warning"),
+    ("{$VMC.SCORE.CRIT}", "60", "vSAN Skyline Health score below this -> High"),
+    ("{$VMC.CPU.WARN}", "20", "Cluster CPU usage (%) -> Warning"),
+    ("{$VMC.CPU.CRIT}", "50", "Cluster CPU usage (%) -> High"),
+    ("{$VMC.MEM.WARN}", "80", "Cluster memory usage (%) -> Warning"),
+    ("{$VMC.MEM.CRIT}", "90", "Cluster memory usage (%) -> High"),
+    ("{$VMC.VSAN.WARN}", "70", "vSAN used space (%) -> Warning"),
+    ("{$VMC.VSAN.CRIT}", "80", "vSAN used space (%) -> High"),
+    ("{$VMC.HOST.CPU.WARN}", "30", "Busiest host CPU (%) -> Warning"),
+    ("{$VMC.HOST.CPU.CRIT}", "35", "Busiest host CPU (%) -> Average"),
+    ("{$VMC.HOST.MEM.WARN}", "76", "Busiest host memory (%) -> Warning"),
+    ("{$VMC.HOST.MEM.CRIT}", "80", "Busiest host memory (%) -> Average"),
+    ("{$VMC.UPTIME.MAX}", "180d", "Host uptime above this -> Info (needs patching)"),
+    ("{$VMC.RESYNC.TIME}", "30m", "vSAN resync running longer than this -> Warning"),
+    ("{$VMC.NODATA}", "5m", "No data from /metrics for this long -> High"),
 ]
 
 VALUEMAPS = {
     "VMware color status": [("0", "green"), ("1", "yellow"), ("2", "red"), ("3", "gray")],
     "vSAN health": [("0", "green"), ("1", "yellow"), ("2", "red"), ("3", "unknown")],
-    "VMware DRS mode": [("0", "Tat"), ("1", "Manual"), ("2", "Partially Automated"), ("3", "Fully Automated")],
-    "Exporter up": [("0", "Loi"), ("1", "OK")],
+    "VMware DRS mode": [("0", "Disabled"), ("1", "Manual"), ("2", "Partially Automated"), ("3", "Fully Automated")],
+    "Exporter up": [("0", "Error"), ("1", "OK")],
 }
 
 
 def trig(name, expr, priority, desc="", depends=None):
-    t = {"uuid": uid("trigger", name, expr), "expression": expr, "name": name, "priority": priority}
+    t = {"uuid": uid("trigger", expr), "expression": expr, "name": name, "priority": priority}
     if desc:
         t["description"] = desc
     if depends:
@@ -81,38 +81,38 @@ def two_level(label, key, warn, crit, func, crit_prio="HIGH", unit="%"):
 
 # (ten, key, metric, value_type, units, valuemap, mo ta)
 RAW = [
-    ("Trang thai tren vCenter", "vmc.cluster.status", "vmware_cluster_status", "UNSIGNED", "", "VMware color status",
-     "overallStatus cua cluster tren vCenter"),
-    ("vSAN health (tong)", "vmc.cluster.vsan.health", "vmware_cluster_vsan_health", "UNSIGNED", "", "vSAN health",
-     "overallHealth cua vSAN Skyline Health - chi can 1 muc do la red"),
+    ("vCenter status", "vmc.cluster.status", "vmware_cluster_status", "UNSIGNED", "", "VMware color status",
+     "Cluster overallStatus reported by vCenter"),
+    ("vSAN overall health", "vmc.cluster.vsan.health", "vmware_cluster_vsan_health", "UNSIGNED", "", "vSAN health",
+     "vSAN Skyline Health overallHealth - red as soon as one check is red"),
     ("vSAN health score", "vmc.cluster.vsan.score", "vmware_cluster_vsan_health_score", "UNSIGNED", "", None,
-     "Diem Cluster health score (0-100) tren vCenter > Monitor > vSAN > Skyline Health"),
+     "Cluster health score (0-100) shown in vCenter > Monitor > vSAN > Skyline Health"),
     ("DRS", "vmc.cluster.drs", "vmware_cluster_drs_mode", "UNSIGNED", "", "VMware DRS mode", ""),
-    ("So host", "vmc.cluster.hosts", "vmware_cluster_hosts", "UNSIGNED", "", None, ""),
-    ("So host hoat dong", "vmc.cluster.hosts.effective", "vmware_cluster_hosts_effective", "UNSIGNED", "", None, ""),
-    ("Tong VM", "vmc.cluster.vms", "vmware_cluster_vms_total", "UNSIGNED", "", None, "Ca VM dang tat"),
-    ("VM dang tat", "vmc.cluster.vms.off", "vmware_cluster_vms_powered_off", "UNSIGNED", "", None, ""),
-    ("CPU tong", "vmc.cluster.cpu.total", "vmware_cluster_cpu_total_hz", "FLOAT", "Hz", None, ""),
-    ("CPU dang dung", "vmc.cluster.cpu.used", "vmware_cluster_cpu_used_hz", "FLOAT", "Hz", None, ""),
-    ("RAM tong", "vmc.cluster.mem.total", "vmware_cluster_mem_total_bytes", "FLOAT", "B", None, ""),
-    ("RAM dang dung", "vmc.cluster.mem.used", "vmware_cluster_mem_used_bytes", "FLOAT", "B", None, ""),
-    ("vSAN tong", "vmc.cluster.vsan.total", "vmware_cluster_vsan_capacity_bytes", "FLOAT", "B", None, ""),
-    ("vSAN con trong", "vmc.cluster.vsan.free", "vmware_cluster_vsan_free_bytes", "FLOAT", "B", None, ""),
+    ("Hosts", "vmc.cluster.hosts", "vmware_cluster_hosts", "UNSIGNED", "", None, ""),
+    ("Effective hosts", "vmc.cluster.hosts.effective", "vmware_cluster_hosts_effective", "UNSIGNED", "", None, ""),
+    ("Total VMs", "vmc.cluster.vms", "vmware_cluster_vms_total", "UNSIGNED", "", None, "Includes powered-off VMs"),
+    ("Powered-off VMs", "vmc.cluster.vms.off", "vmware_cluster_vms_powered_off", "UNSIGNED", "", None, ""),
+    ("CPU total", "vmc.cluster.cpu.total", "vmware_cluster_cpu_total_hz", "FLOAT", "Hz", None, ""),
+    ("CPU used", "vmc.cluster.cpu.used", "vmware_cluster_cpu_used_hz", "FLOAT", "Hz", None, ""),
+    ("Memory total", "vmc.cluster.mem.total", "vmware_cluster_mem_total_bytes", "FLOAT", "B", None, ""),
+    ("Memory used", "vmc.cluster.mem.used", "vmware_cluster_mem_used_bytes", "FLOAT", "B", None, ""),
+    ("vSAN capacity", "vmc.cluster.vsan.total", "vmware_cluster_vsan_capacity_bytes", "FLOAT", "B", None, ""),
+    ("vSAN free", "vmc.cluster.vsan.free", "vmware_cluster_vsan_free_bytes", "FLOAT", "B", None, ""),
     ("vSAN resync", "vmc.cluster.vsan.resync.bytes", "vmware_cluster_vsan_resync_bytes", "FLOAT", "B", None,
-     "Dung luong con phai resync"),
+     "Bytes left to resync"),
     ("vSAN resync objects", "vmc.cluster.vsan.resync.objects", "vmware_cluster_vsan_resync_objects", "UNSIGNED", "",
      None, ""),
-    ("Host uptime (lau nhat)", "vmc.cluster.host.uptime.max", "vmware_cluster_host_uptime_max_seconds", "UNSIGNED",
+    ("Longest host uptime", "vmc.cluster.host.uptime.max", "vmware_cluster_host_uptime_max_seconds", "UNSIGNED",
      "uptime", None, ""),
-    ("CPU host cao nhat", "vmc.cluster.host.cpu.max", "vmware_cluster_host_cpu_max_percent", "FLOAT", "%", None, ""),
-    ("RAM host cao nhat", "vmc.cluster.host.mem.max", "vmware_cluster_host_mem_max_percent", "FLOAT", "%", None, ""),
+    ("Busiest host CPU", "vmc.cluster.host.cpu.max", "vmware_cluster_host_cpu_max_percent", "FLOAT", "%", None, ""),
+    ("Busiest host memory", "vmc.cluster.host.mem.max", "vmware_cluster_host_mem_max_percent", "FLOAT", "%", None, ""),
 ]
 CALC = [
-    ("CPU dang dung (%)", "vmc.cluster.cpu.pused",
+    ("CPU usage (%)", "vmc.cluster.cpu.pused",
      "last(//vmc.cluster.cpu.used[%s])/last(//vmc.cluster.cpu.total[%s])*100" % (C, C)),
-    ("RAM dang dung (%)", "vmc.cluster.mem.pused",
+    ("Memory usage (%)", "vmc.cluster.mem.pused",
      "last(//vmc.cluster.mem.used[%s])/last(//vmc.cluster.mem.total[%s])*100" % (C, C)),
-    ("vSAN da dung (%)", "vmc.cluster.vsan.pused",
+    ("vSAN used (%)", "vmc.cluster.vsan.pused",
      "(last(//vmc.cluster.vsan.total[%s])-last(//vmc.cluster.vsan.free[%s]))/last(//vmc.cluster.vsan.total[%s])*100"
      % (C, C, C)),
 ]
@@ -150,47 +150,47 @@ def item_prototypes():
     hi = ("Cluster %s: vSAN health score < {$VMC.SCORE.CRIT}" % C,
           'last(%s)<{$VMC.SCORE.CRIT:"%s"}' % (score, C))
     add("vmc.cluster.vsan.score", [
-        trig(hi[0], hi[1], "HIGH", "Xem vCenter > Cluster > Monitor > vSAN > Skyline Health"),
+        trig(hi[0], hi[1], "HIGH", "Check vCenter > Cluster > Monitor > vSAN > Skyline Health"),
         trig("Cluster %s: vSAN health score < {$VMC.SCORE.WARN}" % C,
              'last(%s)<{$VMC.SCORE.WARN:"%s"}' % (score, C), "WARNING", depends=hi)])
     add("vmc.cluster.vsan.health", [trig(
-        "Cluster %s: vSAN Skyline Health co muc red" % C, "last(%s)=2" % ref(k("vmc.cluster.vsan.health")), "INFO",
-        "Trang thai tong vSAN = red (co it nhat 1 muc Unhealthy). Muc canh bao chinh dua vao health score.")])
+        "Cluster %s: vSAN Skyline Health has a red check" % C, "last(%s)=2" % ref(k("vmc.cluster.vsan.health")), "INFO",
+        "vSAN overall health is red (at least one Unhealthy finding). Main alerting uses the health score.")])
     add("vmc.cluster.status", [trig(
-        "Cluster %s: vCenter bao trang thai red" % C, "last(%s)=2" % ref(k("vmc.cluster.status")), "AVERAGE")])
+        "Cluster %s: vCenter reports status red" % C, "last(%s)=2" % ref(k("vmc.cluster.status")), "AVERAGE")])
     add("vmc.cluster.drs", [trig(
-        "Cluster %s: DRS dang tat" % C, "last(%s)=0" % ref(k("vmc.cluster.drs")), "INFO")])
-    add("vmc.cluster.cpu.pused", two_level("CPU dang dung", k("vmc.cluster.cpu.pused"),
+        "Cluster %s: DRS is disabled" % C, "last(%s)=0" % ref(k("vmc.cluster.drs")), "INFO")])
+    add("vmc.cluster.cpu.pused", two_level("CPU used", k("vmc.cluster.cpu.pused"),
                                            "{$VMC.CPU.WARN}", "{$VMC.CPU.CRIT}", "min(%s,5m)"))
-    add("vmc.cluster.mem.pused", two_level("RAM dang dung", k("vmc.cluster.mem.pused"),
+    add("vmc.cluster.mem.pused", two_level("Memory used", k("vmc.cluster.mem.pused"),
                                            "{$VMC.MEM.WARN}", "{$VMC.MEM.CRIT}", "min(%s,5m)"))
-    add("vmc.cluster.vsan.pused", two_level("vSAN da dung", k("vmc.cluster.vsan.pused"),
+    add("vmc.cluster.vsan.pused", two_level("vSAN used", k("vmc.cluster.vsan.pused"),
                                             "{$VMC.VSAN.WARN}", "{$VMC.VSAN.CRIT}", "last(%s)"))
-    add("vmc.cluster.host.cpu.max", two_level("CPU host cao nhat", k("vmc.cluster.host.cpu.max"),
+    add("vmc.cluster.host.cpu.max", two_level("Busiest host CPU", k("vmc.cluster.host.cpu.max"),
                                               "{$VMC.HOST.CPU.WARN}", "{$VMC.HOST.CPU.CRIT}", "min(%s,5m)", "AVERAGE"))
-    add("vmc.cluster.host.mem.max", two_level("RAM host cao nhat", k("vmc.cluster.host.mem.max"),
+    add("vmc.cluster.host.mem.max", two_level("Busiest host memory", k("vmc.cluster.host.mem.max"),
                                               "{$VMC.HOST.MEM.WARN}", "{$VMC.HOST.MEM.CRIT}", "min(%s,5m)", "AVERAGE"))
     add("vmc.cluster.vsan.resync.bytes", [trig(
-        "Cluster %s: vSAN resync keo dai hon {$VMC.RESYNC.TIME}" % C,
+        "Cluster %s: vSAN resync running longer than {$VMC.RESYNC.TIME}" % C,
         "min(%s,{$VMC.RESYNC.TIME})>0" % ref(k("vmc.cluster.vsan.resync.bytes")), "WARNING")])
     add("vmc.cluster.host.uptime.max", [trig(
-        "Cluster %s: co host chay lau hon {$VMC.UPTIME.MAX}" % C,
+        "Cluster %s: a host has been up longer than {$VMC.UPTIME.MAX}" % C,
         'last(%s)>={$VMC.UPTIME.MAX:"%s"}' % (ref(k("vmc.cluster.host.uptime.max")), C), "INFO",
-        "Host chay lau nen duoc va loi / patch ESXi")])
+        "Long-running hosts should be patched / rebooted")])
     return out
 
 
 def trigger_prototypes():
     eff, hosts = ref(k("vmc.cluster.hosts.effective")), ref(k("vmc.cluster.hosts"))
-    return [trig("Cluster %s: co host khong hoat dong" % C, "last(%s)<last(%s)" % (eff, hosts), "AVERAGE",
-                 "So host effective nho hon tong so host: host disconnected / maintenance / not responding")]
+    return [trig("Cluster %s: some hosts are not effective" % C, "last(%s)<last(%s)" % (eff, hosts), "AVERAGE",
+                 "Effective hosts < total hosts: a host is disconnected, in maintenance or not responding")]
 
 
 def graph_prototypes():
     items = [("vmc.cluster.cpu.pused", "1A7C11"), ("vmc.cluster.mem.pused", "2774A4"),
              ("vmc.cluster.vsan.pused", "F63100"), ("vmc.cluster.host.cpu.max", "A54F10"),
              ("vmc.cluster.host.mem.max", "6C59DC")]
-    return [{"uuid": uid("graph", "usage"), "name": "Cluster %s: tai nguyen da dung (%%)" % C,
+    return [{"uuid": uid("graph", "usage"), "name": "Cluster %s: resource usage (%%)" % C,
              "ymin_type_1": "FIXED", "ymax_type_1": "FIXED", "yaxismax": "100",
              "graph_items": [{"sortorder": str(i), "color": c, "item": {"host": TPL, "key": k(key)}}
                              for i, (key, c) in enumerate(items)]}]
@@ -198,37 +198,37 @@ def graph_prototypes():
 
 def exporter_items():
     up = ref("vmc.exporter.up")
-    nodata = ("Exporter: khong doc duoc /metrics trong {$VMC.NODATA}", "nodata(%s,{$VMC.NODATA})=1" % up)
+    nodata = ("Exporter: no data from /metrics for {$VMC.NODATA}", "nodata(%s,{$VMC.NODATA})=1" % up)
     return [
         {"uuid": uid("item", "vmc.metrics"), "name": "Exporter: /metrics", "type": "HTTP_AGENT", "key": "vmc.metrics",
          "delay": "1m", "history": "0", "trends": "0", "value_type": "TEXT", "timeout": "15s",
          "url": "http://{HOST.CONN}:{$VMC.PORT}/metrics",
-         "description": "Item chinh: doc toan bo metric cua vmware-cluster-exporter (khong luu lich su)",
+         "description": "Master item: all metrics from vmware-cluster-exporter (no history kept)",
          "tags": [{"tag": "component", "value": "raw"}]},
-        {"uuid": uid("item", "vmc.exporter.up"), "name": "Exporter: lay du lieu vCenter", "type": "DEPENDENT",
+        {"uuid": uid("item", "vmc.exporter.up"), "name": "Exporter: vCenter collection", "type": "DEPENDENT",
          "key": "vmc.exporter.up", "delay": "0", "history": "7d", "value_type": "UNSIGNED",
          "master_item": {"key": "vmc.metrics"}, "valuemap": {"name": "Exporter up"},
          "preprocessing": pattern("vmware_cluster_exporter_up", labeled=False, handler=None),
          "tags": [{"tag": "component", "value": "exporter"}],
          "triggers": [
-             trig("Exporter: khong lay duoc du lieu tu vCenter", "last(%s)=0" % up, "HIGH",
-                  "Xem log: journalctl -u vmware-cluster-exporter@<instance> -n 50", depends=nodata),
-             trig(nodata[0], nodata[1], "HIGH", "Kiem tra service vmware-cluster-exporter va firewall port {$VMC.PORT}"),
+             trig("Exporter: cannot collect data from vCenter", "last(%s)=0" % up, "HIGH",
+                  "Check the log: journalctl -u vmware-cluster-exporter@<instance> -n 50", depends=nodata),
+             trig(nodata[0], nodata[1], "HIGH", "Check the vmware-cluster-exporter service and firewall port {$VMC.PORT}"),
          ]},
-        {"uuid": uid("item", "vmc.exporter.last_success"), "name": "Exporter: lan lay du lieu thanh cong gan nhat",
+        {"uuid": uid("item", "vmc.exporter.last_success"), "name": "Exporter: last successful collection",
          "type": "DEPENDENT", "key": "vmc.exporter.last_success", "delay": "0", "history": "7d",
          "value_type": "UNSIGNED", "units": "unixtime", "master_item": {"key": "vmc.metrics"},
          "preprocessing": pattern("vmware_cluster_exporter_last_success_timestamp_seconds", labeled=False, handler=None),
          "tags": [{"tag": "component", "value": "exporter"}],
-         "triggers": [trig("Exporter: so lieu cu hon 10 phut",
+         "triggers": [trig("Exporter: data older than 10 minutes",
                            "fuzzytime(%s,10m)=0" % ref("vmc.exporter.last_success"), "WARNING",
                            depends=nodata)]},
-        {"uuid": uid("item", "vmc.exporter.duration"), "name": "Exporter: thoi gian lay du lieu", "type": "DEPENDENT",
+        {"uuid": uid("item", "vmc.exporter.duration"), "name": "Exporter: collection duration", "type": "DEPENDENT",
          "key": "vmc.exporter.duration", "delay": "0", "history": "7d", "value_type": "FLOAT", "units": "s",
          "master_item": {"key": "vmc.metrics"},
          "preprocessing": pattern("vmware_cluster_exporter_collect_duration_seconds", labeled=False, handler=None),
          "tags": [{"tag": "component", "value": "exporter"}]},
-        {"uuid": uid("item", "vmc.exporter.version"), "name": "Exporter: phien ban", "type": "DEPENDENT",
+        {"uuid": uid("item", "vmc.exporter.version"), "name": "Exporter: version", "type": "DEPENDENT",
          "key": "vmc.exporter.version", "delay": "0", "history": "7d", "trends": "0", "value_type": "CHAR",
          "master_item": {"key": "vmc.metrics"},
          "preprocessing": [{"type": "PROMETHEUS_PATTERN",
@@ -248,9 +248,10 @@ def clean(items):
 
 template = {
     "uuid": uid("template", TPL), "template": TPL, "name": TPL,
-    "description": "So lieu tong tung cluster VMware tu vmware-cluster-exporter (metric vmware_cluster_*).\n"
-                   "Moi host = 1 instance exporter; dat macro {$VMC.PORT} (9821 pool18, 9822 pool25, 9823 pool6, "
-                   "9824 core) va interface IP 10.16.16.38.\nNguong = macro, giong mau dashboard Grafana VMWARE CLUSTER HCM.",
+    "description": "Per-cluster VMware totals from vmware-cluster-exporter (vmware_cluster_* metrics).\n"
+                   "One host per exporter instance: set macro {$VMC.PORT} (9821 pool18, 9822 pool25, 9823 pool6, "
+                   "9824 core) and an interface with IP 10.16.16.38.\n"
+                   "Thresholds are macros matching the Grafana dashboard VMWARE CLUSTER HCM colors.",
     "groups": [{"name": GROUP}],
     "items": clean(exporter_items()),
     "discovery_rules": [{
