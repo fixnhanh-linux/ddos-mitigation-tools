@@ -162,7 +162,7 @@ chạy `python make_dashboard.py`, import lại (Overwrite).
 File `zabbix_template_vmware_cluster_hcm.yaml` (sinh bằng `python make_zabbix_template.py`). Zabbix đọc thẳng
 `/metrics` của exporter bằng HTTP agent, không cần mật khẩu vCenter trong Zabbix.
 
-1. Data collection → Templates → Import → chọn file YAML → Import.
+1. Configuration → Templates → Import (Zabbix 6.4+: Data collection → Templates) → chọn file YAML → Import.
 2. Tạo 4 host (mỗi instance exporter 1 host), interface Agent IP `10.16.16.38`, gắn template, đặt macro `{$VMC.PORT}`:
 
 | Host | `{$VMC.PORT}` | Cluster tự phát hiện |
