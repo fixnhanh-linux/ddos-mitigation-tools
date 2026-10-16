@@ -27,7 +27,7 @@ Exporter mới chỉ lấy số liệu cấp cluster (không lấy disk health, 
 
 | File | Dùng để |
 |---|---|
-| `vmware-cluster-exporter-linux.zip` + `.sha256` | Gói cài exporter mới (bản 2026.10.16-2) |
+| `vmware-cluster-exporter-linux.zip` + `.sha256` | Gói cài exporter mới (bản 2026.10.16-3) |
 | `vmware_cluster_hcm_grafana.json` | Dashboard để import vào Grafana (cũng có trong gói zip) |
 | `vmware-cluster-exporter/` | Mã nguồn gói: exporter, install/uninstall, systemd unit, scrape config |
 | `make_dashboard.py` | Sinh lại dashboard khi đổi ngưỡng màu / thứ tự ô |
@@ -74,6 +74,15 @@ promtool check config /etc/prometheus/prometheus.yml && systemctl reload prometh
 Nếu `prometheus.yml` liệt kê từng file thay vì `scrape_configs/*.yml`, thêm `vmware-cluster.yml` vào
 `scrape_config_files`. Sửa nhãn `site`/`pool` trong file cho giống `esxi-host-resource.yml` nếu cần.
 
+## 1b. Cập nhật exporter khi có bản mới (không cần cài lại, giữ nguyên cấu hình/mật khẩu)
+
+```bash
+cd /home && sha256sum -c vmware-cluster-exporter-linux.zip.sha256 && rm -rf vmware-cluster-exporter && unzip -o vmware-cluster-exporter-linux.zip
+install -m 644 vmware-cluster-exporter/app/vmware_cluster_exporter.py /opt/vmware-cluster-exporter/
+systemctl restart 'vmware-cluster-exporter@*'
+for p in 9821 9822 9823 9824; do echo -n "$p: "; curl -s localhost:$p/metrics | grep -o 'version="[^"]*"' || echo "CHUA CHAY"; done
+```
+
 ## 2a. Đẩy thêm lên InfluxDB 2.x (tuỳ chọn)
 
 Exporter vẫn phục vụ `/metrics` cho Prometheus (dashboard đọc từ Prometheus), đồng thời sau mỗi vòng lấy dữ liệu
@@ -112,7 +121,7 @@ Nếu trước đó đã import bản thử "CLUSTER VMWARE HCM" (uid `cluster-v
 
 | Ô | Metric | Màu |
 |---|---|---|
-| Cluster Status | `vmware_cluster_vsan_health` (vSAN Skyline Health), không có vSAN thì `vmware_cluster_status` | HEALTHY xanh · WARNING cam · ERROR đỏ |
+| Cluster Status | `vmware_cluster_vsan_health_score` (điểm Skyline Health 0–100, giống "Cluster health score" trên vCenter); không có điểm thì `vmware_cluster_vsan_health`, không có vSAN thì `vmware_cluster_status` | HEALTHY ≥ 80 xanh · WARNING 60–79 cam · ERROR < 60 đỏ |
 | DRS | `vmware_cluster_drs_mode` | Manual / Partially / Fully Automated xanh · Tắt cam |
 | Total Host | `vmware_cluster_hosts` | xanh |
 | Total VM | `vmware_cluster_vms_total` (cả VM đang tắt) | xanh |

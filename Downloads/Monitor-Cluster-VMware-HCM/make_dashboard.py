@@ -24,7 +24,12 @@ THRESHOLDS = {
 
 # (ten o, PromQL, don vi, kieu mau)  - thu tu = thu tu hien tren o
 TILES = [
-    ("Cluster Status", "max(vmware_cluster_vsan_health{%s}) or max(vmware_cluster_status{%s})" % (C, C), "none", "status"),
+    # Diem Skyline Health (giong vCenter): >= 80 HEALTHY, 60-79 WARNING, < 60 ERROR.
+    # Khong co diem (vSAN < 8 / khong vSAN) -> vSAN overall health -> trang thai cluster.
+    ("Cluster Status", "(2 - (max(vmware_cluster_vsan_health_score{%s}) >= bool 60)"
+                       " - (max(vmware_cluster_vsan_health_score{%s}) >= bool 80))"
+                       " or max(vmware_cluster_vsan_health{%s}) or max(vmware_cluster_status{%s})" % (C, C, C, C),
+     "none", "status"),
     ("DRS", "max(vmware_cluster_drs_mode{%s})" % C, "none", "drs"),
     ("Total Host", "max(vmware_cluster_hosts{%s})" % C, "none", "fixed"),
     ("Total VM", "max(vmware_cluster_vms_total{%s})" % C, "none", "fixed"),

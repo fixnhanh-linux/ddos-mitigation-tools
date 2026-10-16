@@ -16,7 +16,7 @@ Day them len InfluxDB (tuy chon, song song voi /metrics cho Prometheus):
   Moi metric -> 1 measurement cung ten, nhan -> tag (them tag vcenter), gia tri -> field "value".
 
 Metric xuat ra (nhan cluster):
-  vmware_cluster_status, _vsan_health, _drs_mode, _hosts, _hosts_effective, _vms_total, _vms_powered_off,
+  vmware_cluster_status, _vsan_health, _vsan_health_score, _drs_mode, _hosts, _hosts_effective, _vms_total, _vms_powered_off,
   vmware_cluster_cpu_total_hz, _cpu_used_hz, _mem_total_bytes, _mem_used_bytes,
   vmware_cluster_vsan_capacity_bytes, _vsan_free_bytes, _vsan_resync_bytes, _vsan_resync_objects,
   vmware_cluster_host_uptime_max_seconds, _host_cpu_max_percent, _host_mem_max_percent,
@@ -39,7 +39,7 @@ from pyVim.connect import Disconnect, SmartConnect
 from pyVmomi import SoapStubAdapter, VmomiSupport, vim, vmodl
 
 # Tang moi lan phat hanh goi zip; kiem tra ban dang chay: curl -s localhost:9821/metrics | grep build_info
-VERSION = "2026.10.16-2"
+VERSION = "2026.10.16-3"
 
 SLOW_INTERVAL = int(os.environ.get("VC_SLOW_INTERVAL", 300))
 
@@ -128,16 +128,20 @@ def collect(vc, user, pwd, cluster_filter, cache):
                 a["mem_max"] = max(a["mem_max"], (qs.overallMemoryUsage or 0) / (hw.memorySize / 1048576) * 100)
 
         if vsan_cl and time.time() - cache.get("slow_ts", 0) >= SLOW_INTERVAL:
-            overall = {}
+            overall, score = {}, {}
             try:
                 hs = vsan_mo(si, vc, ctx, vim.cluster.VsanVcClusterHealthSystem, "vsan-cluster-health-system")
                 for c in vsan_cl:
-                    s = hs.VsanQueryVcClusterHealthSummary(cluster=c, fetchFromCache=True, fields=["overallHealth"])
+                    s = hs.VsanQueryVcClusterHealthSummary(cluster=c, fetchFromCache=True,
+                                                           fields=["overallHealth", "healthScore"])
                     overall[c.name] = s.overallHealth
-                cache.update(vsan_overall=overall, slow_ts=time.time())
+                    if getattr(s, "healthScore", None) is not None:  # vSAN 8+: diem Skyline Health 0-100
+                        score[c.name] = s.healthScore
+                cache.update(vsan_overall=overall, vsan_score=score, slow_ts=time.time())
             except Exception as e:
                 print("Khong lay duoc vSAN health: %s" % (getattr(e, "msg", None) or e), flush=True)
         vsan_overall = cache.get("vsan_overall", {})
+        vsan_score = cache.get("vsan_score", {})
 
         resync = {}
         if vsan_cl:
@@ -160,6 +164,7 @@ def collect(vc, user, pwd, cluster_filter, cache):
                 "cluster": p["name"],
                 "status": COLOR_CODE.get(str(p.get("overallStatus")), 3),
                 "vsan_health": COLOR_CODE.get(vsan_overall.get(p["name"]), 3) if p["name"] in vsan_overall else None,
+                "vsan_score": vsan_score.get(p["name"]),
                 "drs": DRS_CODE.get(str(drs.defaultVmBehavior), 1) if drs and drs.enabled else 0,
                 "hosts": s.numHosts or 0,
                 "hosts_effective": s.numEffectiveHosts or 0,
@@ -198,6 +203,9 @@ def prometheus_text(state):
         if c["vsan_health"] is not None:
             add("vmware_cluster_vsan_health", "Health tong vSAN - Skyline (0=green,1=yellow,2=red,3=unknown)",
                 C, c["vsan_health"])
+        if c["vsan_score"] is not None:
+            add("vmware_cluster_vsan_health_score", "Diem vSAN Skyline Health (0-100, giong Cluster health score tren vCenter)",
+                C, c["vsan_score"])
         add("vmware_cluster_drs_mode", "DRS (0=tat,1=manual,2=partiallyAutomated,3=fullyAutomated)", C, c["drs"])
         add("vmware_cluster_hosts", "So host trong cluster", C, c["hosts"])
         add("vmware_cluster_hosts_effective", "So host dang hoat dong (effective)", C, c["hosts_effective"])

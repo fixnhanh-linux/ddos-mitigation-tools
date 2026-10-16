@@ -90,7 +90,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "max(vmware_cluster_vsan_health{cluster=\"CORE\"}) or max(vmware_cluster_status{cluster=\"CORE\"})",
+          "expr": "(2 - (max(vmware_cluster_vsan_health_score{cluster=\"CORE\"}) >= bool 60) - (max(vmware_cluster_vsan_health_score{cluster=\"CORE\"}) >= bool 80)) or max(vmware_cluster_vsan_health{cluster=\"CORE\"}) or max(vmware_cluster_status{cluster=\"CORE\"})",
           "legendFormat": "Cluster Status",
           "instant": true,
           "range": false
@@ -1261,7 +1261,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "max(vmware_cluster_vsan_health{cluster=\"POOL17\"}) or max(vmware_cluster_status{cluster=\"POOL17\"})",
+          "expr": "(2 - (max(vmware_cluster_vsan_health_score{cluster=\"POOL17\"}) >= bool 60) - (max(vmware_cluster_vsan_health_score{cluster=\"POOL17\"}) >= bool 80)) or max(vmware_cluster_vsan_health{cluster=\"POOL17\"}) or max(vmware_cluster_status{cluster=\"POOL17\"})",
           "legendFormat": "Cluster Status",
           "instant": true,
           "range": false
@@ -2432,7 +2432,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "max(vmware_cluster_vsan_health{cluster=\"POOL18-XD\"}) or max(vmware_cluster_status{cluster=\"POOL18-XD\"})",
+          "expr": "(2 - (max(vmware_cluster_vsan_health_score{cluster=\"POOL18-XD\"}) >= bool 60) - (max(vmware_cluster_vsan_health_score{cluster=\"POOL18-XD\"}) >= bool 80)) or max(vmware_cluster_vsan_health{cluster=\"POOL18-XD\"}) or max(vmware_cluster_status{cluster=\"POOL18-XD\"})",
           "legendFormat": "Cluster Status",
           "instant": true,
           "range": false
@@ -3603,7 +3603,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "max(vmware_cluster_vsan_health{cluster=\"POOL23\"}) or max(vmware_cluster_status{cluster=\"POOL23\"})",
+          "expr": "(2 - (max(vmware_cluster_vsan_health_score{cluster=\"POOL23\"}) >= bool 60) - (max(vmware_cluster_vsan_health_score{cluster=\"POOL23\"}) >= bool 80)) or max(vmware_cluster_vsan_health{cluster=\"POOL23\"}) or max(vmware_cluster_status{cluster=\"POOL23\"})",
           "legendFormat": "Cluster Status",
           "instant": true,
           "range": false
@@ -4774,7 +4774,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "max(vmware_cluster_vsan_health{cluster=\"POOL25\"}) or max(vmware_cluster_status{cluster=\"POOL25\"})",
+          "expr": "(2 - (max(vmware_cluster_vsan_health_score{cluster=\"POOL25\"}) >= bool 60) - (max(vmware_cluster_vsan_health_score{cluster=\"POOL25\"}) >= bool 80)) or max(vmware_cluster_vsan_health{cluster=\"POOL25\"}) or max(vmware_cluster_status{cluster=\"POOL25\"})",
           "legendFormat": "Cluster Status",
           "instant": true,
           "range": false
@@ -5945,7 +5945,7 @@
             "uid": "${datasource}"
           },
           "refId": "A",
-          "expr": "max(vmware_cluster_vsan_health{cluster=\"VC1_POOL6\"}) or max(vmware_cluster_status{cluster=\"VC1_POOL6\"})",
+          "expr": "(2 - (max(vmware_cluster_vsan_health_score{cluster=\"VC1_POOL6\"}) >= bool 60) - (max(vmware_cluster_vsan_health_score{cluster=\"VC1_POOL6\"}) >= bool 80)) or max(vmware_cluster_vsan_health{cluster=\"VC1_POOL6\"}) or max(vmware_cluster_status{cluster=\"VC1_POOL6\"})",
           "legendFormat": "Cluster Status",
           "instant": true,
           "range": false
