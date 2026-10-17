@@ -691,7 +691,6 @@ zabbix_export:
             var t = get('vmware_cluster_cpu_total_hz');
             if (!t) throw 'total = 0';
             return get('vmware_cluster_cpu_used_hz') / t * 100;
-          error_handler: DISCARD_VALUE
         tags:
         - tag: component
           value: cluster
@@ -732,7 +731,6 @@ zabbix_export:
             var t = get('vmware_cluster_mem_total_bytes');
             if (!t) throw 'total = 0';
             return get('vmware_cluster_mem_used_bytes') / t * 100;
-          error_handler: DISCARD_VALUE
         tags:
         - tag: component
           value: cluster
@@ -773,7 +771,6 @@ zabbix_export:
             var t = get('vmware_cluster_vsan_capacity_bytes');
             if (!t) throw 'total = 0';
             return (t - get('vmware_cluster_vsan_free_bytes')) / t * 100;
-          error_handler: DISCARD_VALUE
         tags:
         - tag: component
           value: cluster

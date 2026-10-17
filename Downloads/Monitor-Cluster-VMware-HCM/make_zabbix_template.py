@@ -173,8 +173,8 @@ def item_prototypes():
         out.append({"uuid": uid("proto", key), "name": "Cluster %s: %s" % (C, name), "type": "DEPENDENT",
                     "key": k(key), "delay": "0", "history": "30d", "value_type": "FLOAT", "units": "%",
                     "master_item": {"key": "vmc.metrics"},
-                    "preprocessing": [{"type": "JAVASCRIPT", "parameters": [JS_GET + js],
-                                       "error_handler": "DISCARD_VALUE"}],
+                    # Zabbix 6.0 khong cho dat error_handler o buoc JAVASCRIPT
+                    "preprocessing": [{"type": "JAVASCRIPT", "parameters": [JS_GET + js]}],
                     "tags": [{"tag": "component", "value": "cluster"}, {"tag": "cluster", "value": C}]})
     by_key = {i["key"]: i for i in out}
 
