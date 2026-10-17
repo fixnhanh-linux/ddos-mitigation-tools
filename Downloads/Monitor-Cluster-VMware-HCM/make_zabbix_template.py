@@ -120,14 +120,25 @@ HOSTNAMES = [
     ("Busiest host memory - name", "vmc.cluster.host.mem.max.name", "mem"),
     ("Longest uptime host - name", "vmc.cluster.host.uptime.max.name", "uptime"),
 ]
+# % tinh bang JavaScript tu item chinh (khong dung item calculated: tranh "item is not supported"
+# khi item phu thuoc chua co du lieu luc moi tao). Cluster khong co vSAN -> bo qua gia tri.
+JS_GET = r"""var get = function (n) {
+  var c = '%s'.replace(/[^A-Za-z0-9_-]/g, '\\$&');
+  var r = new RegExp('^' + n + '\\{cluster="' + c + '"\\} (\\S+)', 'm').exec(value);
+  if (!r) throw 'missing ' + n;
+  return parseFloat(r[1]);
+};
+""" % C
 CALC = [
     ("CPU usage (%)", "vmc.cluster.cpu.pused",
-     "last(//vmc.cluster.cpu.used[%s])/last(//vmc.cluster.cpu.total[%s])*100" % (C, C)),
+     "var t = get('vmware_cluster_cpu_total_hz');\nif (!t) throw 'total = 0';\n"
+     "return get('vmware_cluster_cpu_used_hz') / t * 100;"),
     ("Memory usage (%)", "vmc.cluster.mem.pused",
-     "last(//vmc.cluster.mem.used[%s])/last(//vmc.cluster.mem.total[%s])*100" % (C, C)),
+     "var t = get('vmware_cluster_mem_total_bytes');\nif (!t) throw 'total = 0';\n"
+     "return get('vmware_cluster_mem_used_bytes') / t * 100;"),
     ("vSAN used (%)", "vmc.cluster.vsan.pused",
-     "(last(//vmc.cluster.vsan.total[%s])-last(//vmc.cluster.vsan.free[%s]))/last(//vmc.cluster.vsan.total[%s])*100"
-     % (C, C, C)),
+     "var t = get('vmware_cluster_vsan_capacity_bytes');\nif (!t) throw 'total = 0';\n"
+     "return (t - get('vmware_cluster_vsan_free_bytes')) / t * 100;"),
 ]
 
 
@@ -158,10 +169,12 @@ def item_prototypes():
                                                       "label", "host"],
                                        "error_handler": "DISCARD_VALUE"}],
                     "tags": [{"tag": "component", "value": "host"}, {"tag": "cluster", "value": C}]})
-    for name, key, formula in CALC:
-        out.append({"uuid": uid("proto", key), "name": "Cluster %s: %s" % (C, name), "type": "CALCULATED",
-                    "key": k(key), "delay": "1m", "history": "30d", "value_type": "FLOAT", "units": "%",
-                    "params": formula,
+    for name, key, js in CALC:
+        out.append({"uuid": uid("proto", key), "name": "Cluster %s: %s" % (C, name), "type": "DEPENDENT",
+                    "key": k(key), "delay": "0", "history": "30d", "value_type": "FLOAT", "units": "%",
+                    "master_item": {"key": "vmc.metrics"},
+                    "preprocessing": [{"type": "JAVASCRIPT", "parameters": [JS_GET + js],
+                                       "error_handler": "DISCARD_VALUE"}],
                     "tags": [{"tag": "component", "value": "cluster"}, {"tag": "cluster", "value": C}]})
     by_key = {i["key"]: i for i in out}
 

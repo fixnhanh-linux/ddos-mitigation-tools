@@ -670,13 +670,28 @@ zabbix_export:
           value: '{#CLUSTER}'
       - uuid: a2e4388c4b9343f084d5b6db524dae52
         name: 'Cluster {#CLUSTER}: CPU usage (%)'
-        type: CALCULATED
+        type: DEPENDENT
         key: 'vmc.cluster.cpu.pused[{#CLUSTER}]'
-        delay: 1m
+        delay: '0'
         history: 30d
         value_type: FLOAT
         units: '%'
-        params: 'last(//vmc.cluster.cpu.used[{#CLUSTER}])/last(//vmc.cluster.cpu.total[{#CLUSTER}])*100'
+        master_item:
+          key: vmc.metrics
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - |-
+            var get = function (n) {
+              var c = '{#CLUSTER}'.replace(/[^A-Za-z0-9_-]/g, '\\$&');
+              var r = new RegExp('^' + n + '\\{cluster="' + c + '"\\} (\\S+)', 'm').exec(value);
+              if (!r) throw 'missing ' + n;
+              return parseFloat(r[1]);
+            };
+            var t = get('vmware_cluster_cpu_total_hz');
+            if (!t) throw 'total = 0';
+            return get('vmware_cluster_cpu_used_hz') / t * 100;
+          error_handler: DISCARD_VALUE
         tags:
         - tag: component
           value: cluster
@@ -696,13 +711,28 @@ zabbix_export:
             expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.cpu.pused[{#CLUSTER}],5m)>={$VMC.CPU.CRIT:"{#CLUSTER}"}'
       - uuid: 16c725a0870b4628ba2b32d605350bb1
         name: 'Cluster {#CLUSTER}: Memory usage (%)'
-        type: CALCULATED
+        type: DEPENDENT
         key: 'vmc.cluster.mem.pused[{#CLUSTER}]'
-        delay: 1m
+        delay: '0'
         history: 30d
         value_type: FLOAT
         units: '%'
-        params: 'last(//vmc.cluster.mem.used[{#CLUSTER}])/last(//vmc.cluster.mem.total[{#CLUSTER}])*100'
+        master_item:
+          key: vmc.metrics
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - |-
+            var get = function (n) {
+              var c = '{#CLUSTER}'.replace(/[^A-Za-z0-9_-]/g, '\\$&');
+              var r = new RegExp('^' + n + '\\{cluster="' + c + '"\\} (\\S+)', 'm').exec(value);
+              if (!r) throw 'missing ' + n;
+              return parseFloat(r[1]);
+            };
+            var t = get('vmware_cluster_mem_total_bytes');
+            if (!t) throw 'total = 0';
+            return get('vmware_cluster_mem_used_bytes') / t * 100;
+          error_handler: DISCARD_VALUE
         tags:
         - tag: component
           value: cluster
@@ -722,13 +752,28 @@ zabbix_export:
             expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.mem.pused[{#CLUSTER}],5m)>={$VMC.MEM.CRIT:"{#CLUSTER}"}'
       - uuid: d220f55d1184416eb92d4c42cd73dea6
         name: 'Cluster {#CLUSTER}: vSAN used (%)'
-        type: CALCULATED
+        type: DEPENDENT
         key: 'vmc.cluster.vsan.pused[{#CLUSTER}]'
-        delay: 1m
+        delay: '0'
         history: 30d
         value_type: FLOAT
         units: '%'
-        params: '(last(//vmc.cluster.vsan.total[{#CLUSTER}])-last(//vmc.cluster.vsan.free[{#CLUSTER}]))/last(//vmc.cluster.vsan.total[{#CLUSTER}])*100'
+        master_item:
+          key: vmc.metrics
+        preprocessing:
+        - type: JAVASCRIPT
+          parameters:
+          - |-
+            var get = function (n) {
+              var c = '{#CLUSTER}'.replace(/[^A-Za-z0-9_-]/g, '\\$&');
+              var r = new RegExp('^' + n + '\\{cluster="' + c + '"\\} (\\S+)', 'm').exec(value);
+              if (!r) throw 'missing ' + n;
+              return parseFloat(r[1]);
+            };
+            var t = get('vmware_cluster_vsan_capacity_bytes');
+            if (!t) throw 'total = 0';
+            return (t - get('vmware_cluster_vsan_free_bytes')) / t * 100;
+          error_handler: DISCARD_VALUE
         tags:
         - tag: component
           value: cluster
