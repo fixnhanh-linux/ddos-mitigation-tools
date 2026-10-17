@@ -20,6 +20,7 @@ Metric xuat ra (nhan cluster):
   vmware_cluster_cpu_total_hz, _cpu_used_hz, _mem_total_bytes, _mem_used_bytes,
   vmware_cluster_vsan_capacity_bytes, _vsan_free_bytes, _vsan_resync_bytes, _vsan_resync_objects,
   vmware_cluster_host_uptime_max_seconds, _host_cpu_max_percent, _host_mem_max_percent,
+  vmware_cluster_busiest_host_info{kind=cpu|mem|uptime, host=...} (ten host dang cao nhat),
   vmware_cluster_exporter_up / _build_info / _last_success_timestamp_seconds / _collect_duration_seconds
 """
 import base64
@@ -39,12 +40,12 @@ from pyVim.connect import Disconnect, SmartConnect
 from pyVmomi import SoapStubAdapter, VmomiSupport, vim, vmodl
 
 # Tang moi lan phat hanh goi zip; kiem tra ban dang chay: curl -s localhost:9821/metrics | grep build_info
-VERSION = "2026.10.16-3"
+VERSION = "2026.10.16-4"
 
 SLOW_INTERVAL = int(os.environ.get("VC_SLOW_INTERVAL", 300))
 
 CLUSTER_PROPS = ["name", "summary", "overallStatus", "configurationEx", "datastore"]
-HOST_PROPS = ["parent", "runtime.connectionState", "summary.quickStats", "summary.hardware"]
+HOST_PROPS = ["name", "parent", "runtime.connectionState", "summary.quickStats", "summary.hardware"]
 DRS_CODE = {"manual": 1, "partiallyAutomated": 2, "fullyAutomated": 3}  # 0 = DRS tat
 COLOR_CODE = {"green": 0, "yellow": 1, "red": 2}  # con lai (gray/unknown) = 3
 
@@ -118,14 +119,21 @@ def collect(vc, user, pwd, cluster_filter, cache):
                 continue
             qs, hw = p["summary.quickStats"], p["summary.hardware"]
             cpu_cap = (hw.cpuMhz or 0) * (hw.numCpuCores or 0)
-            a = agg.setdefault(p["parent"]._moId, {"cpu": 0, "mem": 0, "uptime": 0, "cpu_max": 0, "mem_max": 0})
+            a = agg.setdefault(p["parent"]._moId, {"cpu": 0, "mem": 0, "uptime": 0, "cpu_max": 0, "mem_max": 0,
+                                                   "uptime_host": "", "cpu_host": "", "mem_host": ""})
+            name = p.get("name", "")
             a["cpu"] += (qs.overallCpuUsage or 0) * 1e6          # MHz -> Hz
             a["mem"] += (qs.overallMemoryUsage or 0) * 1048576   # MB -> bytes
-            a["uptime"] = max(a["uptime"], qs.uptime or 0)
+            if (qs.uptime or 0) >= a["uptime"]:
+                a["uptime"], a["uptime_host"] = qs.uptime or 0, name
             if cpu_cap:
-                a["cpu_max"] = max(a["cpu_max"], (qs.overallCpuUsage or 0) / cpu_cap * 100)
+                pct = (qs.overallCpuUsage or 0) / cpu_cap * 100
+                if pct >= a["cpu_max"]:
+                    a["cpu_max"], a["cpu_host"] = pct, name
             if hw.memorySize:
-                a["mem_max"] = max(a["mem_max"], (qs.overallMemoryUsage or 0) / (hw.memorySize / 1048576) * 100)
+                pct = (qs.overallMemoryUsage or 0) / (hw.memorySize / 1048576) * 100
+                if pct >= a["mem_max"]:
+                    a["mem_max"], a["mem_host"] = pct, name
 
         if vsan_cl and time.time() - cache.get("slow_ts", 0) >= SLOW_INTERVAL:
             overall, score = {}, {}
@@ -180,6 +188,7 @@ def collect(vc, user, pwd, cluster_filter, cache):
                 "host_uptime_max": a.get("uptime") if a else None,
                 "host_cpu_max": a.get("cpu_max") if a else None,
                 "host_mem_max": a.get("mem_max") if a else None,
+                "busiest": {"cpu": a.get("cpu_host"), "mem": a.get("mem_host"), "uptime": a.get("uptime_host")} if a else {},
             })
         return out
     finally:
@@ -226,6 +235,10 @@ def prometheus_text(state):
             add("vmware_cluster_host_uptime_max_seconds", "Uptime cua host chay lau nhat (giay)", C, c["host_uptime_max"])
             add("vmware_cluster_host_cpu_max_percent", "CPU (%) cua host cao nhat", C, round(c["host_cpu_max"], 2))
             add("vmware_cluster_host_mem_max_percent", "RAM (%) cua host cao nhat", C, round(c["host_mem_max"], 2))
+            for kind, host in sorted(c["busiest"].items()):
+                if host:  # ten host dang cao nhat (Zabbix ghi ro host trong trigger)
+                    add("vmware_cluster_busiest_host_info", "Host cao nhat theo kind (cpu/mem/uptime), gia tri = 1",
+                        dict(C, kind=kind, host=host), 1)
 
     add("vmware_cluster_exporter_up", "Lan lay du lieu gan nhat thanh cong (1/0)", None, state["up"])
     add("vmware_cluster_exporter_last_success_timestamp_seconds", "Thoi diem lay du lieu thanh cong gan nhat",

@@ -558,12 +558,6 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: uptime
-        trigger_prototypes:
-        - uuid: ebc5751336384cad8e8a963d7547eb9c
-          expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.uptime.max[{#CLUSTER}])>={$VMC.UPTIME.MAX:"{#CLUSTER}"}'
-          name: 'Cluster {#CLUSTER}: a host has been up longer than {$VMC.UPTIME.MAX}'
-          priority: INFO
-          description: Long-running hosts should be patched / rebooted
       - uuid: b5c1d04ede274a769ea188a4124be124
         name: 'Cluster {#CLUSTER}: Busiest host CPU'
         type: DEPENDENT
@@ -586,18 +580,6 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: '%'
-        trigger_prototypes:
-        - uuid: 8a77acbb66c1412eb19e8f7a03dc5a5a
-          expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}'
-          name: 'Cluster {#CLUSTER}: Busiest host CPU >= {$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}%'
-          priority: AVERAGE
-        - uuid: ab7362507cbe4585ad9fa4e6893558a4
-          expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.WARN:"{#CLUSTER}"}'
-          name: 'Cluster {#CLUSTER}: Busiest host CPU >= {$VMC.HOST.CPU.WARN:"{#CLUSTER}"}%'
-          priority: WARNING
-          dependencies:
-          - name: 'Cluster {#CLUSTER}: Busiest host CPU >= {$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}%'
-            expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}'
       - uuid: 165c52f3e602457780d562cdfa7e688e
         name: 'Cluster {#CLUSTER}: Busiest host memory'
         type: DEPENDENT
@@ -620,18 +602,72 @@ zabbix_export:
         - tag: cluster
           value: '{#CLUSTER}'
         units: '%'
-        trigger_prototypes:
-        - uuid: 180299e6e6bf4bca8aa01e29eff5741e
-          expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}'
-          name: 'Cluster {#CLUSTER}: Busiest host memory >= {$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}%'
-          priority: AVERAGE
-        - uuid: 2b91046c4dcd4196a04b4031d96576c8
-          expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.WARN:"{#CLUSTER}"}'
-          name: 'Cluster {#CLUSTER}: Busiest host memory >= {$VMC.HOST.MEM.WARN:"{#CLUSTER}"}%'
-          priority: WARNING
-          dependencies:
-          - name: 'Cluster {#CLUSTER}: Busiest host memory >= {$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}%'
-            expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}'
+      - uuid: 92f2a1d8610942609680c4624a6ed04c
+        name: 'Cluster {#CLUSTER}: Busiest host CPU - name'
+        type: DEPENDENT
+        key: 'vmc.cluster.host.cpu.max.name[{#CLUSTER}]'
+        delay: '0'
+        history: 7d
+        trends: '0'
+        value_type: CHAR
+        master_item:
+          key: vmc.metrics
+        preprocessing:
+        - type: PROMETHEUS_PATTERN
+          parameters:
+          - 'vmware_cluster_busiest_host_info{cluster="{#CLUSTER}",kind="cpu"}'
+          - label
+          - host
+          error_handler: DISCARD_VALUE
+        tags:
+        - tag: component
+          value: host
+        - tag: cluster
+          value: '{#CLUSTER}'
+      - uuid: 49d3b95f55d04a87b3c4bc1353558887
+        name: 'Cluster {#CLUSTER}: Busiest host memory - name'
+        type: DEPENDENT
+        key: 'vmc.cluster.host.mem.max.name[{#CLUSTER}]'
+        delay: '0'
+        history: 7d
+        trends: '0'
+        value_type: CHAR
+        master_item:
+          key: vmc.metrics
+        preprocessing:
+        - type: PROMETHEUS_PATTERN
+          parameters:
+          - 'vmware_cluster_busiest_host_info{cluster="{#CLUSTER}",kind="mem"}'
+          - label
+          - host
+          error_handler: DISCARD_VALUE
+        tags:
+        - tag: component
+          value: host
+        - tag: cluster
+          value: '{#CLUSTER}'
+      - uuid: c6b579542086466e89f0c72cb8e93575
+        name: 'Cluster {#CLUSTER}: Longest uptime host - name'
+        type: DEPENDENT
+        key: 'vmc.cluster.host.uptime.max.name[{#CLUSTER}]'
+        delay: '0'
+        history: 7d
+        trends: '0'
+        value_type: CHAR
+        master_item:
+          key: vmc.metrics
+        preprocessing:
+        - type: PROMETHEUS_PATTERN
+          parameters:
+          - 'vmware_cluster_busiest_host_info{cluster="{#CLUSTER}",kind="uptime"}'
+          - label
+          - host
+          error_handler: DISCARD_VALUE
+        tags:
+        - tag: component
+          value: host
+        - tag: cluster
+          value: '{#CLUSTER}'
       - uuid: a2e4388c4b9343f084d5b6db524dae52
         name: 'Cluster {#CLUSTER}: CPU usage (%)'
         type: CALCULATED
@@ -716,6 +752,33 @@ zabbix_export:
         name: 'Cluster {#CLUSTER}: some hosts are not effective'
         priority: AVERAGE
         description: 'Effective hosts < total hosts: a host is disconnected, in maintenance or not responding'
+      - uuid: 1f390f0cdc404cc98fa24f8bcaa207a2
+        expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.CRIT:"{#CLUSTER}"} and length(last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max.name[{#CLUSTER}]))>=0'
+        name: 'Cluster {#CLUSTER}: host {ITEM.LASTVALUE2} CPU >= {$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}% (now {ITEM.LASTVALUE1})'
+        priority: AVERAGE
+      - uuid: 5a98c96d7b3545a3ada28b8f69905271
+        expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.WARN:"{#CLUSTER}"} and length(last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max.name[{#CLUSTER}]))>=0'
+        name: 'Cluster {#CLUSTER}: host {ITEM.LASTVALUE2} CPU >= {$VMC.HOST.CPU.WARN:"{#CLUSTER}"}% (now {ITEM.LASTVALUE1})'
+        priority: WARNING
+        dependencies:
+        - name: 'Cluster {#CLUSTER}: host {ITEM.LASTVALUE2} CPU >= {$VMC.HOST.CPU.CRIT:"{#CLUSTER}"}% (now {ITEM.LASTVALUE1})'
+          expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max[{#CLUSTER}],5m)>={$VMC.HOST.CPU.CRIT:"{#CLUSTER}"} and length(last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.cpu.max.name[{#CLUSTER}]))>=0'
+      - uuid: 0e0d852aa0c44a3ea72334a9c6ef63b6
+        expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.CRIT:"{#CLUSTER}"} and length(last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max.name[{#CLUSTER}]))>=0'
+        name: 'Cluster {#CLUSTER}: host {ITEM.LASTVALUE2} memory >= {$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}% (now {ITEM.LASTVALUE1})'
+        priority: AVERAGE
+      - uuid: 3eaeed3a5ac5433d8bd0b4c3740017fb
+        expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.WARN:"{#CLUSTER}"} and length(last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max.name[{#CLUSTER}]))>=0'
+        name: 'Cluster {#CLUSTER}: host {ITEM.LASTVALUE2} memory >= {$VMC.HOST.MEM.WARN:"{#CLUSTER}"}% (now {ITEM.LASTVALUE1})'
+        priority: WARNING
+        dependencies:
+        - name: 'Cluster {#CLUSTER}: host {ITEM.LASTVALUE2} memory >= {$VMC.HOST.MEM.CRIT:"{#CLUSTER}"}% (now {ITEM.LASTVALUE1})'
+          expression: 'min(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max[{#CLUSTER}],5m)>={$VMC.HOST.MEM.CRIT:"{#CLUSTER}"} and length(last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.mem.max.name[{#CLUSTER}]))>=0'
+      - uuid: 67e328fe9db14fe2b575047677f192fc
+        expression: 'last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.uptime.max[{#CLUSTER}])>={$VMC.UPTIME.MAX:"{#CLUSTER}"} and length(last(/VMware Cluster HCM by vmware-cluster-exporter/vmc.cluster.host.uptime.max.name[{#CLUSTER}]))>=0'
+        name: 'Cluster {#CLUSTER}: host {ITEM.LASTVALUE2} up longer than {$VMC.UPTIME.MAX} (now {ITEM.LASTVALUE1})'
+        priority: INFO
+        description: Long-running hosts should be patched / rebooted
       graph_prototypes:
       - uuid: 2773db3b851b4b4296e033f013ca1d1e
         name: 'Cluster {#CLUSTER}: resource usage (%)'

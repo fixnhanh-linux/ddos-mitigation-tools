@@ -70,12 +70,19 @@ def trig(name, expr, priority, desc="", depends=None):
     return t
 
 
-def two_level(label, key, warn, crit, func, crit_prio="HIGH", unit="%"):
-    """Cap Warning + cap cao hon; Warning phu thuoc cap cao de khong bao 2 lan."""
+def two_level(label, key, warn, crit, func, crit_prio="HIGH", unit="%", host_key=None):
+    """Cap Warning + cap cao hon; Warning phu thuoc cap cao de khong bao 2 lan.
+    host_key: item ten host -> trigger ghi ro host ({ITEM.LASTVALUE2}) va gia tri hien tai ({ITEM.LASTVALUE1})."""
     fn = func % ref(key)  # vd min(/Template/key,5m)
     ctx = lambda m: '{%s:"%s"}' % (m[1:-1], C)  # {$VMC.CPU.CRIT} -> {$VMC.CPU.CRIT:"{#CLUSTER}"}
-    hi = ("Cluster %s: %s >= %s%s" % (C, label, ctx(crit), unit), "%s>=%s" % (fn, ctx(crit)))
-    lo = ("Cluster %s: %s >= %s%s" % (C, label, ctx(warn), unit), "%s>=%s" % (fn, ctx(warn)))
+    if host_key:
+        tail = ' and length(last(%s))>=0' % ref(host_key)
+        name = lambda m: "Cluster %s: host {ITEM.LASTVALUE2} %s >= %s%s (now {ITEM.LASTVALUE1})" % (C, label, ctx(m), unit)
+    else:
+        tail = ""
+        name = lambda m: "Cluster %s: %s >= %s%s" % (C, label, ctx(m), unit)
+    hi = (name(crit), "%s>=%s%s" % (fn, ctx(crit), tail))
+    lo = (name(warn), "%s>=%s%s" % (fn, ctx(warn), tail))
     return [trig(hi[0], hi[1], crit_prio), trig(lo[0], lo[1], "WARNING", depends=hi)]
 
 
@@ -107,6 +114,12 @@ RAW = [
     ("Busiest host CPU", "vmc.cluster.host.cpu.max", "vmware_cluster_host_cpu_max_percent", "FLOAT", "%", None, ""),
     ("Busiest host memory", "vmc.cluster.host.mem.max", "vmware_cluster_host_mem_max_percent", "FLOAT", "%", None, ""),
 ]
+# Ten host dang cao nhat (exporter >= 2026.10.16-4): (ten, key, kind)
+HOSTNAMES = [
+    ("Busiest host CPU - name", "vmc.cluster.host.cpu.max.name", "cpu"),
+    ("Busiest host memory - name", "vmc.cluster.host.mem.max.name", "mem"),
+    ("Longest uptime host - name", "vmc.cluster.host.uptime.max.name", "uptime"),
+]
 CALC = [
     ("CPU usage (%)", "vmc.cluster.cpu.pused",
      "last(//vmc.cluster.cpu.used[%s])/last(//vmc.cluster.cpu.total[%s])*100" % (C, C)),
@@ -136,6 +149,15 @@ def item_prototypes():
         if vmap:
             it["valuemap"] = {"name": vmap}
         out.append(it)
+    for name, key, kind in HOSTNAMES:
+        out.append({"uuid": uid("proto", key), "name": "Cluster %s: %s" % (C, name), "type": "DEPENDENT", "key": k(key),
+                    "delay": "0", "history": "7d", "trends": "0", "value_type": "CHAR",
+                    "master_item": {"key": "vmc.metrics"},
+                    "preprocessing": [{"type": "PROMETHEUS_PATTERN",
+                                       "parameters": ['vmware_cluster_busiest_host_info{cluster="%s",kind="%s"}' % (C, kind),
+                                                      "label", "host"],
+                                       "error_handler": "DISCARD_VALUE"}],
+                    "tags": [{"tag": "component", "value": "host"}, {"tag": "cluster", "value": C}]})
     for name, key, formula in CALC:
         out.append({"uuid": uid("proto", key), "name": "Cluster %s: %s" % (C, name), "type": "CALCULATED",
                     "key": k(key), "delay": "1m", "history": "30d", "value_type": "FLOAT", "units": "%",
@@ -166,24 +188,21 @@ def item_prototypes():
                                            "{$VMC.MEM.WARN}", "{$VMC.MEM.CRIT}", "min(%s,5m)"))
     add("vmc.cluster.vsan.pused", two_level("vSAN used", k("vmc.cluster.vsan.pused"),
                                             "{$VMC.VSAN.WARN}", "{$VMC.VSAN.CRIT}", "last(%s)"))
-    add("vmc.cluster.host.cpu.max", two_level("Busiest host CPU", k("vmc.cluster.host.cpu.max"),
-                                              "{$VMC.HOST.CPU.WARN}", "{$VMC.HOST.CPU.CRIT}", "min(%s,5m)", "AVERAGE"))
-    add("vmc.cluster.host.mem.max", two_level("Busiest host memory", k("vmc.cluster.host.mem.max"),
-                                              "{$VMC.HOST.MEM.WARN}", "{$VMC.HOST.MEM.CRIT}", "min(%s,5m)", "AVERAGE"))
     add("vmc.cluster.vsan.resync.bytes", [trig(
         "Cluster %s: vSAN resync running longer than {$VMC.RESYNC.TIME}" % C,
         "min(%s,{$VMC.RESYNC.TIME})>0" % ref(k("vmc.cluster.vsan.resync.bytes")), "WARNING")])
-    add("vmc.cluster.host.uptime.max", [trig(
-        "Cluster %s: a host has been up longer than {$VMC.UPTIME.MAX}" % C,
-        'last(%s)>={$VMC.UPTIME.MAX:"%s"}' % (ref(k("vmc.cluster.host.uptime.max")), C), "INFO",
-        "Long-running hosts should be patched / rebooted")])
     return out
 
 
 def trigger_prototypes():
     eff, hosts = ref(k("vmc.cluster.hosts.effective")), ref(k("vmc.cluster.hosts"))
     return [trig("Cluster %s: some hosts are not effective" % C, "last(%s)<last(%s)" % (eff, hosts), "AVERAGE",
-                 "Effective hosts < total hosts: a host is disconnected, in maintenance or not responding")]
+                 "Effective hosts < total hosts: a host is disconnected, in maintenance or not responding")] +         two_level("CPU", k("vmc.cluster.host.cpu.max"), "{$VMC.HOST.CPU.WARN}", "{$VMC.HOST.CPU.CRIT}",
+                  "min(%s,5m)", "AVERAGE", host_key=k("vmc.cluster.host.cpu.max.name")) +         two_level("memory", k("vmc.cluster.host.mem.max"), "{$VMC.HOST.MEM.WARN}", "{$VMC.HOST.MEM.CRIT}",
+                  "min(%s,5m)", "AVERAGE", host_key=k("vmc.cluster.host.mem.max.name")) +         [trig("Cluster %s: host {ITEM.LASTVALUE2} up longer than {$VMC.UPTIME.MAX} (now {ITEM.LASTVALUE1})" % C,
+              'last(%s)>={$VMC.UPTIME.MAX:"%s"} and length(last(%s))>=0'
+              % (ref(k("vmc.cluster.host.uptime.max")), C, ref(k("vmc.cluster.host.uptime.max.name"))), "INFO",
+              "Long-running hosts should be patched / rebooted")]
 
 
 def graph_prototypes():
