@@ -759,3 +759,12 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
   .sa-main > .btn { padding: 8px 6px; font-size: 13px; gap: 4px; }
   .sa-tools .btn { padding: 5px 9px; font-size: 12px; }
 }
+@media (max-width: 640px) {
+  /* nut chinh tren dau trang (Them site / Them BMC / Them tai khoan) van hien chu */
+  .head-actions .btn.primary span.lbl { display: inline; }
+  .head-actions .btn.primary { padding: 6px 14px; }
+  /* chip cong cu: 3 cot deu nhau, khong de 1 chip roi le xuong dong */
+  .sa-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .sa-tools .btn { justify-content: center; min-width: 0; padding: 6px 4px; }
+  .sa-tools .btn.chip-warn { grid-column: 1 / -1; }
+}
