@@ -43,7 +43,7 @@ RE_USER = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 RE_HEADER_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 RE_IP = re.compile(r"^[0-9a-fA-F:.]{2,45}$")
 LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
-ROLES = ("admin", "operator", "viewer")
+ROLES = ("admin", "operator", "viewer", "customer")  # customer: chi thay BMC cua minh (cong khach hang)
 
 BMC_DEFAULTS = {
     "site": "",

@@ -41,6 +41,8 @@ Cổng truy cập BMC / IPMI (iDRAC, iLO, AMI, Supermicro…) cho **nhiều site
 | Cảnh báo | Telegram / email: site mất liên lạc, BMC mất kết nối, BMC sắp hết hạn, áp dụng lỗi, khoá tài khoản, cập nhật agent |
 | Truy cập BMC | Ai mở trang BMC / console nào, lúc nào, từ IP nào. Link tạm cho khách (có hạn, thu hồi được). Xuất CSV |
 | Cập nhật agent | Bấm 1 nút trên web: agent tự tải bản mới (kiểm SHA-256), chạy thử, sao lưu bản cũ, khởi động lại |
+| Cổng khách hàng | Vai trò **Khách hàng**: chỉ thấy BMC của mình (theo nhãn / danh sách), tự mở BMC (link 4 giờ), xem lịch sử truy cập |
+| Lịch bảo trì | Theo site hoặc BMC: không gửi cảnh báo, trang lỗi IPMI ghi "đang bảo trì", khách hàng thấy BMC đang bảo trì |
 
 ## 1. Cài web (controller)
 

@@ -117,7 +117,7 @@ MESSAGES = {
 }
 
 
-def page(bmc, status, kind="web"):
+def page(bmc, status, kind="web", maint=None):
     """Tra ve (ma HTTP, header, bytes). Traefik giu nguyen ma loi goc (502/503/504)."""
     if not bmc:
         body = "<h1>Bad Gateway</h1>".encode()
@@ -137,6 +137,12 @@ def page(bmc, status, kind="web"):
             f"<tr><td>Cổng {fill['port']}</td><td>{mark(d.get('tcp'))} {fill['tcp_error']}</td></tr>"
             + (f"<tr><td>HTTPS / TLS</td><td>{mark(d.get('tls'))} {fill['tls_info']}</td></tr>" if "tls" in d else ""))
     note = html.escape(bmc.get("note") or "")
+    maint_html = ""
+    if maint:  # dang trong lich bao tri: bao ro cho nguoi dung, khong phai su co
+        maint_html = ('<div style="background:#422006;border:1px solid #a16207;color:#fde68a;border-radius:10px;'
+                      'padding:10px 14px;margin:0 0 14px">🔧 <b>Đang bảo trì</b> đến ' + html.escape(maint.get("end", ""))
+                      + (" · " + html.escape(maint["note"]) if maint.get("note") else "")
+                      + ". BMC có thể tạm không truy cập được.</div>")
     body = f"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>IPMI lỗi - BMC {bmc['port']}</title>
 <style>body{{font:15px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;display:grid;place-items:center;min-height:100vh}}
@@ -145,7 +151,7 @@ h1{{font-size:21px;margin:0 0 6px;color:#fca5a5}}.s{{color:#94a3b8;font-size:13p
 table{{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}}td{{padding:7px 10px;border-top:1px solid #1e2b47}}
 .ok{{color:#4ade80}}.bad{{color:#f87171}}li{{margin:5px 0}}code{{color:#7dd3fc}}
 button{{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-size:14px;cursor:pointer}}</style></head>
-<body><div class="b"><div class="s">IPMI / BMC {bmc['port']}{' · ' + note if note else ''} · HTTP {html.escape(str(status))}</div>
+<body><div class="b">{maint_html}<div class="s">IPMI / BMC {bmc['port']}{' · ' + note if note else ''} · HTTP {html.escape(str(status))}</div>
 <h1>{html.escape(title)}</h1><p>{desc}</p><table>{rows}</table>
 <b>Cách xử lý</b><ol>{steps}</ol>
 <button onclick="location.reload()">Thử lại</button>

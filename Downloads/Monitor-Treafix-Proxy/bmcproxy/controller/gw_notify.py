@@ -225,13 +225,17 @@ class Notifier:
             if s["token_set"] and s["seen"]:
                 cur[("site", s["key"])] = (not s["online"], s)
             for b in s["bmcs"]:
-                cur[("bmc", s["key"], b["port"])] = (b["down"], {**b, "site": s["key"], "site_label": s["label"]})
+                cur[("bmc", s["key"], b["port"])] = (b["down"], {**b, "site": s["key"], "site_label": s["label"],
+                                                                 "maint": b.get("maint") or s.get("maint")})
         events = []
         first = self.state is None
         prev = self.state or {}
         new_state = {}
         for key, (bad, info) in cur.items():
             was = prev.get(key, False)
+            if info.get("maint"):  # dang bao tri: khong bao, giu trang thai cu (het bao tri ma van loi -> bao)
+                new_state[key] = was
+                continue
             if bad and key not in self.since:
                 self.since[key] = now
             if not bad:

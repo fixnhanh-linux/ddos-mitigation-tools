@@ -350,6 +350,8 @@ class Agent:
             return
         if "guests" in resp:
             self.gateway.set_guests(resp["guests"])
+        if "maint" in resp:
+            self.gateway.set_maint(resp["maint"])
         if self.controller_ok is not True:
             log("đã kết nối controller")
         self.controller_ok = True

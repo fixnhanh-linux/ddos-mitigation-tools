@@ -624,3 +624,25 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
 .sa-tools .btn.chip-warn .ico { color: var(--warn); }
 #guest-panel .table td { vertical-align: top; }
 .nowrap { white-space: nowrap; }
+
+/* ---------- cong khach hang ---------- */
+.customer-only { display: none !important; }
+.customer-mode .customer-only { display: flex !important; }
+.customer-mode .side-nav > a:not(.customer-only):not([data-page="settings"]),
+.customer-mode .side-nav .nav-group, .customer-mode #pending-bar, .customer-mode #head-actions { display: none !important; }
+.my-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.my-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; }
+.my-card header { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px 8px; }
+.my-card header h3 { font-size: 17px; }
+.my-card .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); margin-top: 7px; flex: none; }
+.my-card .dot.ok { background: var(--ok); } .my-card .dot.bad { background: var(--bad); } .my-card .dot.warn { background: var(--warn); }
+.my-card .kv { padding: 0 16px 12px; flex: 1; }
+.my-card footer { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line-2);
+  background: var(--panel-2); border-radius: 0 0 var(--radius) var(--radius); flex-wrap: wrap; }
+.my-maint { margin: 0 16px 10px; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 13px; }
+.maint-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); }
+.maint-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--line-2); }
+.maint-row:first-child { border-top: 0; }
+.maint-row .grow { min-width: 0; }
+.maint-row .btn { padding: 4px 10px; font-size: 12.5px; }

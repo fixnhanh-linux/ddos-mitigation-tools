@@ -14,7 +14,7 @@ const state = {
   me: null, page: "overview", sites: [], bmcs: [], overview: null, warnings: [],
   settings: null, filter: "", editing: null, templates: {}, selected: new Set(),
 };
-const ROLE_LABEL = { admin: "Quản trị", operator: "Vận hành", viewer: "Chỉ xem" };
+const ROLE_LABEL = { admin: "Quản trị", operator: "Vận hành", viewer: "Chỉ xem", customer: "Khách hàng" };
 const PHASE = {
   synced: ["ok", "đã đồng bộ"], pending: ["warn", "chưa áp dụng"], applying: ["info", "đang áp dụng"],
   failed: ["bad", "áp dụng lỗi"], empty: ["", "chưa có BMC"],
@@ -115,7 +115,8 @@ const canEdit = (site) => state.me && (state.me.role === "admin" ||
   (state.me.role === "operator" && (!state.me.sites.length || state.me.sites.includes(site))));
 const editableSites = () => state.sites.filter((s) => canEdit(s.key));
 const siteLabel = (k) => { const s = state.sites.find((x) => x.key === k); return s ? s.label : k; };
-const RANK = { viewer: 0, operator: 1, admin: 2 };
+const RANK = { customer: -1, viewer: 0, operator: 1, admin: 2 };
+const isCustomer = () => state.me && state.me.role === "customer";
 
 // ------------------------------------------------------------------ Đăng nhập
 function showLogin() {
@@ -143,6 +144,16 @@ async function showApp(me) {
   $("#avatar").title = me.name + " (" + (ROLE_LABEL[me.role] || me.role) + ")";
   $$("[data-min-role]").forEach((a) => a.classList.toggle("hidden", RANK[me.role] < RANK[a.dataset.minRole]));
   $$("[data-admin-only]").forEach((a) => a.classList.toggle("hidden", !isAdmin()));
+  $("#app").classList.toggle("customer-mode", me.role === "customer");
+  if (me.role === "customer") {  // cong khach hang: chi "BMC cua toi" + Cai dat (mat khau, 2FA)
+    $("#whorole").textContent = ROLE_LABEL.customer;
+    initSidebar();
+    if (!["#my", "#settings"].includes(location.hash)) history.replaceState(null, "", "#my");
+    route();
+    $("#app").classList.remove("hidden");
+    if (me.must_change) forcePasswordChange();
+    return;
+  }
   state.settings = await api("GET", "settings");
   state.templates = await api("GET", "templates");
   await refreshAll();
@@ -216,6 +227,7 @@ const PAGES = {
   bmcs: { title: "BMC", sub: "Mỗi BMC được mở qua một cổng riêng trên server Traefik của site" },
   traefik: { title: "Traefik", sub: "Router đang chạy trên từng server" },
   access: { title: "Truy cập BMC", sub: "Ai mở BMC / console nào, lúc nào, từ đâu · link tạm cho khách" },
+  my: { title: "BMC của tôi", sub: "Mở trang quản trị server (IPMI) của bạn ngay trên trình duyệt" },
   audit: { title: "Nhật ký", sub: "Ai đã làm gì, lúc nào" },
   backups: { title: "Sao lưu", sub: "Tự sao lưu trước mỗi lần nhập, khôi phục, xoá site" },
   users: { title: "Người dùng", sub: "Tài khoản đăng nhập giao diện và quyền theo site" },
@@ -224,6 +236,7 @@ const PAGES = {
 };
 
 const SITE_ICO = {
+  wrench: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4Z"/></svg>',
   play: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
   retry: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
   list: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/></svg>',
@@ -276,6 +289,8 @@ function route() {
   }
   const link = $(`.side-nav a[data-page="${page}"]`);
   if (!PAGES[page] || (link && link.classList.contains("hidden"))) page = "overview";
+  if (isCustomer() && !["my", "settings"].includes(page)) page = "my";
+  if (!isCustomer() && page === "my") page = "overview";
   state.page = page;
   $$(".side-nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
   $$(".page").forEach((p) => p.classList.toggle("hidden", p.id !== "page-" + page));
@@ -287,6 +302,7 @@ function route() {
   if (page === "backups") loadBackups();
   if (page === "audit") loadAudit();
   if (page === "access") loadAccess();
+  if (page === "my") loadMy();
   if (page === "users") loadUsers();
   if (page === "settings") renderSettings();
 }
@@ -352,9 +368,10 @@ document.addEventListener("click", (e) => {
 
 // ------------------------------------------------------------------ Dữ liệu chung
 async function refreshAll() {
-  const [sites, bmcs, ov, warnings] = await Promise.all([
-    api("GET", "sites"), api("GET", "bmcs"), api("GET", "overview"), api("GET", "warnings"),
+  const [sites, bmcs, ov, warnings, maint] = await Promise.all([
+    api("GET", "sites"), api("GET", "bmcs"), api("GET", "overview"), api("GET", "warnings"), api("GET", "maint"),
   ]);
+  state.maint = maint;
   state.sites = sites;
   state.bmcs = bmcs;
   state.overview = ov;
@@ -402,6 +419,14 @@ async function recheck(site) {
 function siteDot(s) {
   return `<span class="dot ${s.online ? "up" : "down"}" title="${s.online ? "agent đang kết nối" : "agent mất liên lạc"}"></span>`;
 }
+// Lich bao tri dang dien ra cho site (port 0 = chi lich ca site) hoac BMC (ke ca lich ca site)
+function maintFor(site, port = 0) {
+  const hits = (state.maint || []).filter((m) => m.status === "active" && m.site === site
+    && (port ? (!m.port || m.port === port) : !m.port));
+  return hits.sort((a, b) => (a.end < b.end ? 1 : -1))[0] || null;
+}
+const hhmm = (v) => String(v || "").replace("T", " ").slice(5, 16);
+
 function phaseTag(s) {
   const [cls, txt] = PHASE[s.phase] || ["", s.phase];
   return `<span class="tag ${cls}">${txt}</span>`;
@@ -468,6 +493,8 @@ function renderSites() {
       <header>${siteDot(s)}<div class="grow"><h3>${esc(s.label)} <span class="cell-sub mono">${esc(s.key)}</span></h3>
         <p class="sub mono">${esc(s.domain)}</p></div>
         <div class="hd-right">${phaseTag(s)}
+          ${maintFor(s.key) ? `<span class="tag warn" title="${esc(maintFor(s.key).note || "")}">🔧 bảo trì đến ${esc(hhmm(maintFor(s.key).end))}</span>`
+            : (state.maint || []).some((m) => m.status === "active" && m.site === s.key) ? '<span class="tag warn">🔧 có BMC bảo trì</span>' : ""}
           ${isAdmin() ? `<span class="sa-admin">
             <button class="btn icon-btn ghost" data-site-act="edit" data-site="${k}" title="Sửa site" aria-label="Sửa site">${SITE_ICO.edit}</button>
             <button class="btn icon-btn ghost" data-site-act="token" data-site="${k}" title="Token agent" aria-label="Token agent">${SITE_ICO.key}</button>
@@ -509,6 +536,7 @@ function renderSites() {
           ${edit ? `<button class="btn" data-site-act="recheck" data-site="${k}" title="Hỏi lại trạng thái agent / Traefik">${SITE_ICO.check}Kiểm tra</button>` : ""}
           ${edit && s.online ? `<button class="btn" data-site-act="diagnose" data-site="${k}" title="Ping / thử cổng / thử TLS mọi BMC từ server site">${SITE_ICO.pulse}Kiểm tra BMC</button>` : ""}
           ${edit ? `<button class="btn" data-site-act="import" data-site="${k}" title="Đọc config nginx cũ trên server">${SITE_ICO.import}Nhập nginx</button>` : ""}
+          ${edit ? `<button class="btn" data-site-act="maint" data-site="${k}" title="Khung giờ bảo trì: không gửi cảnh báo, trang lỗi IPMI ghi 'đang bảo trì'">${SITE_ICO.wrench}Bảo trì</button>` : ""}
           <button class="btn" data-site-act="history" data-site="${k}">${SITE_ICO.clock}Lịch sử${s.history_count ? `<span class="count">${s.history_count}</span>` : ""}</button>
           ${isAdmin() && s.online ? `<button class="btn" data-site-act="server" data-site="${k}" title="Log agent / Traefik, restart từ xa">${SITE_ICO.server}Server</button>` : ""}
           ${isAdmin() && agentOutdated(s) ? `<button class="btn chip-warn" data-site-act="update" data-site="${k}" title="Agent tự tải bản ${esc(s.agent_pkg_build)} từ web, cài, khởi động lại">${SITE_ICO.import}Cập nhật agent</button>` : ""}
@@ -546,6 +574,7 @@ $("#site-grid").addEventListener("click", async (e) => {
       case "history": return siteHistory(s);
       case "server": return siteServer(s);
       case "update": return siteUpdateAgent(s);
+      case "maint": return siteMaint(s);
       case "install": return showInstall(s);
       case "edit": return editSite(s);
       case "token":
@@ -729,6 +758,7 @@ function renderBmcs() {
       b.console_port ? (b.console_auth ? '<span class="tag ok">console</span>' : '<span class="tag bad">console mở</span>') : "",
       (b.imported_auth === false || b.imported_console_auth === false) ? '<span class="tag warn" title="Trước đây không có xác thực">mới bật</span>' : "",
       b.expected_target ? `<span class="tag info" title="Target bắt buộc">⌖ ${esc(b.expected_target)}</span>` : "",
+      maintFor(b.site, b.port) ? `<span class="tag warn" title="${esc(maintFor(b.site, b.port).note || "")}">🔧 bảo trì đến ${esc(hhmm(maintFor(b.site, b.port).end))}</span>` : "",
     ].join("");
     const opts = [
       b.legacy_tls ? '<span class="tag warn">TLS cũ</span>' : "", b.jsesp_cache ? '<span class="tag">jsesp</span>' : "",
@@ -1153,6 +1183,79 @@ $("#btn-audit-csv").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 });
 
+// ------------------------------------------------------------------ Cổng khách hàng
+const MY_ST = { up: ["ok", "hoạt động"], down: ["bad", "mất kết nối"], maint: ["warn", "đang bảo trì"], unknown: ["", "chưa rõ"] };
+async function loadMy() {
+  const [list, acc] = await Promise.all([api("GET", "my/bmcs"), api("GET", "my/access")]);
+  const notes = Object.fromEntries(list.map((b) => [`${b.site}:${b.port}`, b.note]));
+  $("#my-grid").innerHTML = list.map((b) => {
+    const [cls, label] = MY_ST[b.status] || ["", b.status];
+    return `<article class="my-card">
+      <header><span class="dot ${cls}"></span><div class="grow"><h3>Cổng ${b.port}</h3><p class="sub">${esc(b.note || b.site_label)}</p></div>
+        <span class="tag ${cls}">${label}</span></header>
+      ${b.maint ? `<div class="my-maint">🔧 Đang bảo trì đến <b>${esc(hhmm(b.maint.end))}</b>${b.maint.note ? ` · ${esc(b.maint.note)}` : ""}</div>` : ""}
+      <dl class="kv"><dt>Trung tâm</dt><dd>${esc(b.site_label)}</dd>
+        ${b.expires ? `<dt>Hạn dịch vụ</dt><dd>${esc(b.expires)}</dd>` : ""}
+        ${b.java_web ? "<dt>Console</dt><dd>mở ngay trên web (trong trang BMC)</dd>" : ""}</dl>
+      <footer><button class="btn primary" data-my-open="${esc(b.site)}:${b.port}">${SITE_ICO.play}Mở BMC</button>
+        <span class="hint">Mở trong tab mới · link dùng 4 giờ</span></footer></article>`;
+  }).join("") || '<div class="panel"><p class="hint">Chưa có BMC nào gắn với tài khoản của bạn. Liên hệ nhà cung cấp.</p></div>';
+  $("#my-access").innerHTML = acc.map((a) => `<tr><td class="mono">${esc(fmtTs(a.ts))}</td>
+    <td><b class="mono">${a.port}</b><div class="cell-sub">${esc(notes[`${a.site}:${a.port}`] || "")}</div></td>
+    <td>${esc(a.user)}</td><td class="mono">${esc(a.ip)}</td>
+    <td><span class="tag">${a.kind === "console" ? "console" : a.kind === "guest-open" ? "mở link" : "trang BMC"}</span></td></tr>`).join("")
+    || '<tr><td colspan="5" class="hint" style="padding:18px">Chưa có lượt truy cập nào.</td></tr>';
+}
+$("#my-grid").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-my-open]");
+  if (!b) return;
+  const [site, port] = b.dataset.myOpen.split(":");
+  const w = window.open("about:blank", "_blank");  // mo tab ngay khi bam (tranh trinh duyet chan popup)
+  try {
+    const r = await api("POST", "my/open", { site, port: Number(port) });
+    if (w) { w.opener = null; w.location.href = r.url; } else location.href = r.url;
+    if (!r.site_online) toast("Máy chủ proxy đang mất kết nối - BMC có thể chưa mở được", true);
+  } catch (err) { if (w) w.close(); toast(err.message, true); }
+});
+
+// ------------------------------------------------------------------ Lịch bảo trì
+const MAINT_ST = { active: '<span class="tag warn">đang diễn ra</span>', upcoming: '<span class="tag info">sắp tới</span>',
+  done: '<span class="tag">đã xong</span>' };
+const localInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+function siteMaint(s) {
+  const rows = (state.maint || []).filter((m) => m.site === s.key).slice(0, 12);
+  const bmcs = state.bmcs.filter((b) => b.site === s.key);
+  formBox(`Lịch bảo trì · ${s.label}`, [
+    { type: "html", html: `<p class="hint">Trong khung giờ bảo trì: web <b>không gửi cảnh báo</b> (site / BMC mất kết nối), trang lỗi IPMI ghi
+      <b>"đang bảo trì đến …"</b>, khách hàng thấy BMC đang bảo trì. Hết giờ mà vẫn lỗi thì cảnh báo gửi như bình thường.</p>
+      ${rows.length ? `<div class="maint-list">${rows.map((m) => `<div class="maint-row">
+        <div><b class="nowrap">${m.port ? `BMC ${m.port}` : "Cả site"}</b> ${MAINT_ST[m.status] || ""}
+          <div class="mono cell-sub nowrap">${esc(hhmm(m.start))} → ${esc(hhmm(m.end))}</div></div>
+        <div class="grow">${esc(m.note || "")}<div class="cell-sub">${esc(m.created_by || "")}${m.ended_by ? ` · kết thúc sớm bởi ${esc(m.ended_by)}` : ""}</div></div>
+        ${m.status !== "done" ? `<button type="button" class="btn small danger-ghost" data-maint-del="${esc(m.id)}">${m.status === "active" ? "Kết thúc" : "Huỷ"}</button>` : ""}
+      </div>`).join("")}</div>` : ""}<h3 class="mt">Thêm lịch bảo trì</h3>` },
+    { type: "select", name: "port", label: "Phạm vi", value: "0", span: false,
+      options: [["0", "Cả site (mọi BMC + agent)"], ...bmcs.map((b) => [String(b.port), `BMC ${b.port}${b.note ? " · " + b.note : ""}`])] },
+    { name: "note", label: "Ghi chú (vd thay switch, nâng cấp firmware)", span: false },
+    { name: "start", label: "Bắt đầu", type: "datetime-local", value: localInput(new Date()), span: false },
+    { name: "end", label: "Kết thúc", type: "datetime-local", value: localInput(new Date(Date.now() + 2 * 3600000)), span: false },
+  ], async (d) => {
+    await api("POST", "maint", { site: s.key, port: Number(d.port), start: d.start, end: d.end, note: d.note });
+    toast("Đã thêm lịch bảo trì");
+    await refreshAll();
+  }, "Thêm lịch");
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-maint-del]");
+  if (!b) return;
+  try {
+    await api("DELETE", `maint/${encodeURIComponent(b.dataset.maintDel)}`);
+    toast("Đã cập nhật lịch bảo trì");
+    (b.closest(".maint-row") || b.closest("tr")).remove();
+    await refreshAll();
+  } catch (err) { toast(err.message, true); }
+});
+
 // ------------------------------------------------------------------ Truy cập BMC
 const ACCESS_KIND = { web: ["", "trang BMC"], console: ["info", "console"], "guest-open": ["warn", "khách mở link"] };
 let accessRows = [];
@@ -1291,7 +1394,8 @@ async function loadUsers() {
       ${u.full_name ? `<div class="cell-sub">${esc(u.full_name)}</div>` : ""}
       ${u.email ? `<div class="cell-sub">${esc(u.email)}</div>` : ""}${u.note ? `<div class="cell-sub">${esc(u.note)}</div>` : ""}</td>
     <td><span class="tag ${u.role === "admin" ? "info" : ""}">${ROLE_LABEL[u.role] || u.role}</span></td>
-    <td>${u.role === "admin" || !u.sites.length ? '<span class="cell-sub">mọi site</span>' : u.sites.map((s) => `<span class="tag">${esc(siteLabel(s))}</span>`).join("")}</td>
+    <td>${u.role === "customer" ? [...(u.bmc_tags || []).map((t) => `<span class="tag info">${esc(t)}</span>`), ...(u.bmc_list || []).map((x) => `<span class="tag mono">${esc(x)}</span>`)].join("")
+      : u.role === "admin" || !u.sites.length ? '<span class="cell-sub">mọi site</span>' : u.sites.map((s) => `<span class="tag">${esc(siteLabel(s))}</span>`).join("")}</td>
     <td>${STATUS[u.status] || ""} ${u.source === "ldap" ? `<span class="tag info" title="${esc((u.ldap_groups || []).join("\n") || "Đăng nhập bằng AD")}">AD</span>` : ""}
       ${u.totp ? '<span class="tag info" title="Đã bật xác thực 2 lớp">2FA</span>' : ""}
       ${u.must_change ? '<span class="tag warn">phải đổi MK</span>' : ""}
@@ -1348,6 +1452,9 @@ function editUser(u) {
       type: "checks", name: "sites", label: "Phạm vi site (để trống = mọi site; quản trị luôn là mọi site)", value: u ? u.sites : [],
       options: state.sites.map((s) => [s.key, s.label])
     },
+    { type: "html", html: '<p class="hint"><b>Khách hàng</b>: chỉ thấy trang "BMC của tôi" với các BMC theo nhãn / danh sách dưới đây, tự mở BMC (link 4 giờ), không thấy site hay cài đặt.</p>' },
+    { name: "bmc_tags", label: "Khách hàng · nhãn BMC (cách nhau dấu phẩy)", value: u ? (u.bmc_tags || []).join(", ") : "", placeholder: "KH-ABC", span: false },
+    { name: "bmc_list", label: "Khách hàng · BMC cụ thể (site:cổng)", value: u ? (u.bmc_list || []).join(" ") : "", placeholder: "hcm:8001 hcm:8005", span: false },
     { name: "full_name", label: "Họ tên", value: u ? u.full_name : "", span: false },
     { name: "email", label: "Email / điện thoại", value: u ? u.email : "", span: false },
     { name: "note", label: "Ghi chú", value: u ? u.note : "", placeholder: "vd nhà thầu, phòng NOC" },
@@ -1517,6 +1624,12 @@ $("#btn-notify-test").addEventListener("click", async () => {
 });
 
 function renderSettings() {
+  $("#settings-form").classList.toggle("hidden", isCustomer());
+  if (isCustomer()) {
+    renderTwofa();
+    $("#server-info").innerHTML = `<dt>Tài khoản</dt><dd>${esc(state.me.name)} (${ROLE_LABEL.customer})</dd>`;
+    return;
+  }
   renderTwofa();
   loadNotify().catch((err) => { $("#notify-msg").textContent = err.message; });
   loadLdap().catch((err) => { $("#ldap-msg").textContent = err.message; });
@@ -1578,7 +1691,9 @@ $("#password-form").addEventListener("submit", async (e) => {
 (async () => {
   try { await showApp(await api("GET", "me")); } catch { showLogin(); }
   setInterval(() => {
-    if (!$("#app").classList.contains("hidden") && !document.hidden && !$("#dlg-plan").open) refreshAll().catch(() => { });
+    if ($("#app").classList.contains("hidden") || document.hidden || $("#dlg-plan").open) return;
+    if (isCustomer()) { if (state.page === "my") loadMy().catch(() => { }); return; }
+    refreshAll().catch(() => { });
   }, 15000);
 })();
 

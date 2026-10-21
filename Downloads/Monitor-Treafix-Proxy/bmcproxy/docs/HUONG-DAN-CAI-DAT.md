@@ -1116,3 +1116,36 @@ Quay về bản cũ (trên server site):
 ```bash
 sudo cp /opt/bmcproxy/agent-data/agent-backup-<thời gian>/* /opt/bmcproxy/ && sudo systemctl restart bmcproxy-agent
 ```
+
+## 29. Cổng cho khách hàng
+
+Tài khoản vai trò **Khách hàng** chỉ thấy trang **BMC của tôi**. Khách không thấy site, cài đặt, nhật ký hay BMC của khách khác.
+
+**Tạo tài khoản** (Người dùng → Thêm tài khoản, chỉ quản trị):
+- Vai trò: **Khách hàng**.
+- **Nhãn BMC**: vd `KH-ABC`. Khách thấy mọi BMC có nhãn này (đặt nhãn ở BMC → Sửa → Nhãn, hoặc chọn nhiều → Nhãn…). Thêm BMC mới có nhãn đó là khách tự thấy.
+- Hoặc **BMC cụ thể**: `hcm:8001 hcm:8005` (site:cổng).
+- Phải có ít nhất 1 nhãn hoặc 1 BMC. Gửi khách: link web (kể cả link bí mật nếu bật) + tài khoản. Khách tự đổi mật khẩu, bật 2FA ở Cài đặt.
+
+**Khách dùng thế nào:**
+- Mỗi BMC là 1 thẻ: trạng thái (hoạt động / mất kết nối / **đang bảo trì**), trung tâm, hạn dịch vụ.
+- **Mở BMC**: web cấp link tạm 4 giờ (như link khách), mở tab mới vào thẳng trang BMC, console Java trên web dùng được luôn. Bấm lại thì link cũ của BMC đó bị thu hồi.
+- **Lịch sử truy cập**: ai mở BMC của khách, lúc nào, từ IP nào.
+- BMC hết hạn (`Hạn sử dụng`) hoặc đang tắt thì không hiện nữa.
+
+Bảo mật: tài khoản khách hàng bị chặn ở mọi API của nhân viên (trả 403), kể cả `/api/zabbix`. Khoá, đặt hạn, đăng xuất từ xa, lịch sử đăng nhập dùng như tài khoản thường. Mỗi lần khách bấm Mở BMC được ghi vào Nhật ký (`portal-open`).
+
+## 30. Lịch bảo trì
+
+Site → **Bảo trì** (vận hành / quản trị của site đó): chọn **cả site** hoặc **1 BMC**, giờ bắt đầu / kết thúc, ghi chú.
+
+| Trong giờ bảo trì | |
+|---|---|
+| Cảnh báo | **Không gửi** cảnh báo site mất liên lạc / BMC mất kết nối. Hết giờ mà vẫn lỗi thì cảnh báo gửi bình thường |
+| Trang lỗi IPMI | Có biển **"Đang bảo trì đến …"** + ghi chú, người dùng biết không phải sự cố |
+| Web | Thẻ site có nhãn 🔧, BMC có nhãn **bảo trì đến …**, Tổng quan ghi "Đang bảo trì" |
+| Khách hàng | BMC hiện **đang bảo trì** + ghi chú trên trang BMC của tôi |
+
+- Lịch **sắp tới** bấm **Huỷ** để xoá. Lịch **đang diễn ra** bấm **Kết thúc** để kết thúc ngay (giữ lại lịch sử).
+- Lịch đã xong được giữ 90 ngày. Mọi thêm / kết thúc đều ghi Nhật ký (`maint-add`, `maint-end`).
+- Agent nhận lịch qua lần đồng bộ (10 giây), không cần Áp dụng.

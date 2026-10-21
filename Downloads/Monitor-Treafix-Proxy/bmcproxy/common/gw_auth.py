@@ -48,6 +48,7 @@ class AuthGateway:
         self.lock = threading.Lock()
         self.stats = {}
         self.guests = {}        # hash(ma link khach) -> {"port", "exp", "label", "id"} (web gui xuong moi lan sync)
+        self.maint = []         # lich bao tri dang dien ra (web gui xuong)
         self.access = []        # lan mo BMC chua gui ve web
         self.seen = {}          # (cong, ip, nguoi, loai) -> lan cuoi thay
 
@@ -128,6 +129,23 @@ class AuthGateway:
                 continue
         with self.lock:
             self.guests = g
+
+    def set_maint(self, items):
+        out = []
+        for x in items or []:
+            try:
+                out.append({"port": int(x.get("port") or 0), "end": str(x.get("end", ""))[:20],
+                            "end_ts": float(x.get("end_ts") or 0), "note": str(x.get("note", ""))[:120]})
+            except (TypeError, ValueError):
+                continue
+        with self.lock:
+            self.maint = out
+
+    def maint_for(self, port):
+        now = time.time()
+        with self.lock:
+            hits = [m for m in self.maint if m["end_ts"] > now and (not m["port"] or m["port"] == port)]
+        return max(hits, key=lambda m: m["end_ts"]) if hits else None
 
     def guest(self, port, token):
         if not token:
@@ -277,7 +295,8 @@ def make_auth_handler(gateway):
             bmc = gateway._bmc(int(port)) if port.isdigit() else None
             try:
                 code, headers, body = gw_errpage.page(bmc, (q.get("status") or ["502"])[0],
-                                                      (q.get("kind") or ["web"])[0])
+                                                      (q.get("kind") or ["web"])[0],
+                                                      maint=gateway.maint_for(bmc["port"]) if bmc else None)
             except Exception as e:  # khong de trang loi lam hong them
                 sys.stderr.write(f"errpage {port}: {e}\n")
                 code, headers, body = 200, {"Content-Type": "text/plain; charset=utf-8"}, b"Bad Gateway"

@@ -109,6 +109,16 @@ class NotifyTest(unittest.TestCase):
         self.assertIn("cổng 8001", FakeTelegram.got[2]["text"])
         self.assertTrue(all(x["result"].get("telegram") == "ok" for x in n.sent))
 
+    def test_maint_suppresses(self):
+        snap = {"sites": [{"key": "hcm", "label": "HCM", "token_set": True, "seen": True, "online": True, "maint": False,
+                           "hostname": "h", "bmcs": []}], "expiring": []}
+        n = self.N.Notifier(lambda: self.cfg, lambda: snap)
+        n.check(now=1000)
+        snap["sites"][0].update(online=False, maint=True)
+        self.assertEqual(n.check(now=1060), [])          # mat lien lac trong luc bao tri: khong bao
+        snap["sites"][0]["maint"] = False
+        self.assertEqual([e[0] for e in n.check(now=1120)], ["site_offline"])  # het bao tri ma van mat -> bao
+
     def test_validate_and_hide_secret(self):
         with self.assertRaises(Exception):
             self.N.validate({"telegram": {"enabled": True, "bot_token": "sai", "chat_id": "1"}})
@@ -169,7 +179,7 @@ class SiteTest(unittest.TestCase):
         # agent nhan danh sach link khach qua sync
         s, _, resp = self.sync()
         self.assertEqual(s, 200)
-        self.assertEqual(len(resp["guests"]), 1)
+        self.assertEqual(len([x for x in resp["guests"] if x["id"] == g["id"]]), 1)
         gw = AuthGateway(lambda: {"bmcs": [{"port": 8001, "enabled": True}]})
         gw.set_guests(resp["guests"])
         aport = free_port()
@@ -203,9 +213,70 @@ class SiteTest(unittest.TestCase):
         self.assertEqual([a["kind"] for a in gw.pop_access()], ["web", "console"])
         # thu hoi -> sync sau khong con link
         self.assertEqual(req(self.port, "DELETE", f"/api/guests/{g['id']}", None, self.ck)[0], 200)
-        self.assertEqual(self.sync()[2]["guests"], [])
+        self.assertFalse([x for x in self.sync()[2]["guests"] if x["id"] == g["id"]])
         lst = req(self.port, "GET", "/api/guests", None, self.ck)[2]
-        self.assertEqual(lst[0]["status"], "revoked")
+        self.assertEqual(next(x for x in lst if x["id"] == g["id"])["status"], "revoked")
+
+    def test_customer_portal(self):
+        from gw_common import hash_password
+        req(self.port, "POST", "/api/bmcs", {"site": "hcm", "port": 8005, "upstream": "https://10.0.0.6",
+                                             "template": "idrac9", "note": "KH ABC", "tags": "KH-ABC"}, self.ck)
+        # tao tai khoan khach hang: bat buoc co nhan / danh sach BMC
+        bad = req(self.port, "POST", "/api/users", {"name": "kh1", "password": "x" * 12, "role": "customer"}, self.ck)
+        self.assertEqual(bad[0], 400)
+        pw = "K-" + secrets.token_hex(8)
+        s, _, r = req(self.port, "POST", "/api/users", {"name": "kh.abc", "password": pw, "role": "customer",
+                                                        "bmc_tags": "KH-ABC", "must_change": ""}, self.ck)
+        self.assertEqual(s, 201, r)
+        s, h, me = req(self.port, "POST", "/api/login", {"user": "kh.abc", "password": pw})
+        self.assertEqual((s, me["role"]), (200, "customer"))
+        kc = {"Cookie": h["Set-Cookie"].split(";")[0]}
+        mine = req(self.port, "GET", "/api/my/bmcs", None, kc)[2]
+        self.assertEqual([b["port"] for b in mine], [8005])
+        # moi API cua nhan vien deu bi chan
+        for m, path in (("GET", "/api/bmcs"), ("GET", "/api/sites"), ("GET", "/api/overview"), ("GET", "/api/audit"),
+                        ("GET", "/api/access"), ("GET", "/api/guests"), ("GET", "/api/settings"), ("GET", "/api/users"),
+                        ("GET", "/api/maint"), ("POST", "/api/apply"), ("GET", "/api/zabbix")):
+            self.assertEqual(req(self.port, m, path, {} if m == "POST" else None, kc)[0], 403, path)
+        # mo BMC cua minh -> link khach 4 gio; BMC khac -> 403
+        s, _, o = req(self.port, "POST", "/api/my/open", {"site": "hcm", "port": 8005}, kc)
+        self.assertEqual(s, 200, o)
+        self.assertIn(":8005/__bmcgw/guest?t=", o["url"])
+        self.assertEqual(req(self.port, "POST", "/api/my/open", {"site": "hcm", "port": 8001}, kc)[0], 403)
+        req(self.port, "POST", "/api/my/open", {"site": "hcm", "port": 8005}, kc)
+        portal = [g for g in self.sync()[2]["guests"] if g["port"] == 8005]
+        self.assertEqual(len(portal), 1)  # mo lai -> link cu cua cung BMC bi thu hoi
+        self.assertEqual(req(self.port, "GET", "/api/my/access", None, kc)[0], 200)
+        self.assertEqual(req(self.port, "POST", "/api/password", {"old": pw, "new": "N-" + secrets.token_hex(8)}, kc)[0], 200)
+
+    def test_maintenance(self):
+        import gw_errpage
+        from gw_auth import AuthGateway
+        import datetime as dt
+        now = dt.datetime.now()
+        f = lambda d: d.strftime("%Y-%m-%dT%H:%M")
+        self.assertEqual(req(self.port, "POST", "/api/maint", {"site": "hcm", "start": f(now), "end": f(now - dt.timedelta(hours=1))},
+                             self.ck)[0], 400)
+        s, _, m = req(self.port, "POST", "/api/maint", {"site": "hcm", "port": 0, "start": f(now - dt.timedelta(minutes=1)),
+                                                        "end": f(now + dt.timedelta(hours=1)), "note": "thay switch"}, self.ck)
+        self.assertEqual((s, m["status"]), (201, "active"), m)
+        req(self.port, "POST", "/api/maint", {"site": "hcm", "port": 8001, "start": f(now + dt.timedelta(days=1)),
+                                              "end": f(now + dt.timedelta(days=1, hours=2))}, self.ck)
+        rows = req(self.port, "GET", "/api/maint", None, self.ck)[2]
+        self.assertEqual([r["status"] for r in rows], ["active", "upcoming"])
+        warns = req(self.port, "GET", "/api/warnings", None, self.ck)[2]
+        self.assertTrue(any("bảo trì" in w["text"] for w in warns))
+        resp = self.sync()[2]
+        self.assertEqual(len(resp["maint"]), 1)
+        gw = AuthGateway(lambda: {"bmcs": []})
+        gw.set_maint(resp["maint"])
+        mt = gw.maint_for(8001)
+        self.assertEqual(mt["note"], "thay switch")
+        body = gw_errpage.page({"port": 8001, "upstream": "https://127.0.0.1:1", "note": ""}, "502", maint=mt)[2].decode()
+        self.assertIn("Đang bảo trì", body)
+        # ket thuc som -> agent khong con bien bao tri
+        self.assertEqual(req(self.port, "DELETE", f"/api/maint/{m['id']}", None, self.ck)[0], 200)
+        self.assertEqual(self.sync()[2]["maint"], [])
 
     def test_render_guest_router(self):
         from gw_render import expected_routers, render_bmc

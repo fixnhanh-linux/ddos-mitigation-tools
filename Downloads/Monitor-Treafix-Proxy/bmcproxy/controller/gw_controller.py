@@ -195,7 +195,7 @@ def agent_pkg_info():
 
 class Store:
     FILES = ("bmc.json", "settings.json", "sites.json", "users.json", "state.json", "templates.json", "auth.json",
-             "notify.json", "guests.json")
+             "notify.json", "guests.json", "maint.json")
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -311,6 +311,7 @@ class Store:
         self.auth = docs.get("auth.json", {})  # dang nhap AD / LDAP (rieng, khong anh huong ban cau hinh site)
         self.notify = docs.get("notify.json", {})  # canh bao Telegram / email
         self.guests = docs.get("guests.json", {})  # link tam cho khach: id -> {...}
+        self.maint = docs.get("maint.json", {})    # lich bao tri: id -> {site, port (0 = ca site), start, end, note}
 
     def _p(self, *name):
         return os.path.join(self.dir, *name)
@@ -340,6 +341,7 @@ class Store:
             self.auth = read_json(self._p("auth.json"), {})
             self.notify = read_json(self._p("notify.json"), {})
             self.guests = read_json(self._p("guests.json"), {})
+            self.maint = read_json(self._p("maint.json"), {})
             self.mtimes = cur
 
     def _refresh_db(self):
@@ -387,7 +389,8 @@ class Store:
                 "templates.json": lambda: self.templates,
                 "auth.json": lambda: self.auth,
                 "notify.json": lambda: self.notify,
-                "guests.json": lambda: self.guests}[name]()
+                "guests.json": lambda: self.guests,
+                "maint.json": lambda: self.maint}[name]()
         write_json(self._p(name), data, 0o600 if name in ("users.json", "sites.json", "auth.json", "notify.json", "guests.json") else 0o644)
         self.mtimes[name] = self._mtime(name)
         if self.db:
@@ -711,10 +714,13 @@ class App:
         u = self.store.users[name]
         return {"name": name, "role": u.get("role", "viewer"), "sites": u.get("sites") or [],
                 "full_name": u.get("full_name", ""), "must_change": bool(u.get("must_change")),
-                "totp": bool(u.get("totp_secret")), "source": u.get("source", "local")}
+                "totp": bool(u.get("totp_secret")), "source": u.get("source", "local"),
+                "bmc_tags": u.get("bmc_tags") or [], "bmc_list": u.get("bmc_list") or []}
 
     @staticmethod
     def can_view(u, site):
+        if u["role"] == "customer":
+            return False
         return u["role"] == "admin" or not u["sites"] or site in u["sites"]
 
     def can_edit(self, u, site):
@@ -731,6 +737,56 @@ class App:
 
     def visible_sites(self, u):
         return [k for k in sorted(self.store.sites) if self.can_view(u, k)]
+
+    # ------------------------------------------------------------ cong khach hang
+    def customer_bmcs(self, u):
+        """BMC thuoc tai khoan khach hang: theo nhan (KH-...) hoac danh sach site:cong."""
+        tags = {t.lower() for t in u.get("bmc_tags") or []}
+        keys = set(u.get("bmc_list") or [])
+        out = []
+        for b in self.store.bmcs:
+            if not b.get("enabled", True) or bmc_expired(b):
+                continue
+            if f"{b['site']}:{b['port']}" in keys or tags & {t.lower() for t in b.get("tags") or []}:
+                out.append(b)
+        return sorted(out, key=bmc_key)
+
+    # ------------------------------------------------------------ lich bao tri
+    @staticmethod
+    def _now_local():
+        return dt.datetime.now().strftime("%Y-%m-%dT%H:%M")
+
+    def maint_active(self, site, port=0, now=None):
+        """Lich bao tri dang dien ra cho site (port=0) hoac 1 BMC (ke ca lich ca site) -> ban ghi | None."""
+        now = now or self._now_local()
+        best = None
+        for mid, m in self.store.maint.items():
+            if m["site"] != site or not (m["start"] <= now < m["end"]):
+                continue
+            if m.get("port") and (not port or m["port"] != port):
+                continue
+            if not best or m["end"] > best["end"]:
+                best = {**m, "id": mid}
+        return best
+
+    def maint_view(self, mid, m, now=None):
+        now = now or self._now_local()
+        status = "active" if m["start"] <= now < m["end"] else "upcoming" if now < m["start"] else "done"
+        return {"id": mid, **m, "status": status, "site_label": self.store.sites.get(m["site"], {}).get("label", m["site"])}
+
+    def site_maint(self, site):
+        """Bao tri dang dien ra -> gui xuong agent (trang loi IPMI hien bien bao tri)."""
+        now = self._now_local()
+        out = []
+        for m in self.store.maint.values():
+            if m["site"] == site and m["start"] <= now < m["end"]:
+                try:
+                    end_ts = dt.datetime.strptime(m["end"], "%Y-%m-%dT%H:%M").timestamp()
+                except ValueError:
+                    continue
+                out.append({"port": m.get("port") or 0, "end": m["end"].replace("T", " "), "end_ts": end_ts,
+                            "note": m.get("note", "")})
+        return out
 
     # ------------------------------------------------------------ link tam cho khach
     def site_guests(self, site):
@@ -768,11 +824,13 @@ class App:
                         continue
                     web = (health.get(str(b["port"])) or {}).get("web") or {}
                     bmcs.append({"port": b["port"], "note": b.get("note", ""), "upstream": b.get("upstream", ""),
-                                 "down": online and web.get("up") is False, "error": web.get("error", "")})
+                                 "down": online and web.get("up") is False, "error": web.get("error", ""),
+                                 "maint": bool(self.maint_active(k, b["port"]))})
                     exp = b.get("expires") or ""
                     if exp and today.isoformat() <= exp <= soon:
                         expiring.append({"site": k, "port": b["port"], "expires": exp, "note": b.get("note", "")})
                 sites.append({"key": k, "label": s["label"], "token_set": bool(s.get("token_hash")),
+                              "maint": bool(self.maint_active(k)),
                               "seen": bool(h) or bool((st.state.get(k) or {}).get("applied")),
                               "online": online, "hostname": h.get("hostname"), "bmcs": bmcs})
         return {"sites": sites, "expiring": sorted(expiring, key=lambda x: x["expires"])}
@@ -1278,7 +1336,8 @@ def make_handler(app):
                 with st.lock:
                     cmds = app.commands.pop(site, [])
                     target = (st.state.get(site) or {}).get("target")
-                resp = {"target": target, "commands": cmds, "server_time": now_iso(), "guests": app.site_guests(site)}
+                resp = {"target": target, "commands": cmds, "server_time": now_iso(), "guests": app.site_guests(site),
+                        "maint": app.site_maint(site)}
                 att = data.get("attempt") or {}
                 # Agent da ap dung nhung goi /report bi mat (mang chap chon): lay ket qua tu heartbeat
                 if target and (att.get("rev"), att.get("attempt")) == (target["rev"], target["attempt"]):
@@ -1422,6 +1481,111 @@ def make_handler(app):
             cookie = (f"bmcproxy_session={token}; Path={(st.cfg.get('web_path') or '') + '/'}; HttpOnly; SameSite=Strict"
                       + (f"; Max-Age={REMEMBER_TTL}" if remember else "") + secure)
             return self.send(200, app.user(name), headers={"Set-Cookie": cookie})
+
+        def api_my(self, method, what, u):
+            """Cong khach hang: BMC cua toi, mo BMC (link tam), lich su truy cap."""
+            mine = app.customer_bmcs(u)
+            keys = {(b["site"], b["port"]) for b in mine}
+            if method == "GET" and what == "bmcs":
+                out = []
+                for b in mine:
+                    h = app.hb.get(b["site"]) or {}
+                    web = ((h.get("health") or {}).get(str(b["port"])) or {}).get("web") or {}
+                    online = app.online(b["site"])
+                    m = app.maint_active(b["site"], b["port"])
+                    out.append({"site": b["site"], "site_label": st.sites[b["site"]]["label"], "port": b["port"],
+                                "note": b.get("note", ""), "expires": b.get("expires", ""),
+                                "java_web": bool(b.get("java_web")),
+                                "status": "maint" if m else "unknown" if not online or not web
+                                else "up" if web.get("up") else "down",
+                                "maint": {"end": m["end"], "note": m.get("note", "")} if m else None})
+                return self.send(200, out)
+            if method == "GET" and what == "access":
+                rows = [r for r in st.read_access(3000) if (r.get("site"), r.get("port")) in keys][:300]
+                return self.send(200, rows)
+            if method == "POST" and what == "open":
+                data = self.body_json(2000)
+                try:
+                    key = (str(data.get("site", "")), int(data.get("port")))
+                except (TypeError, ValueError):
+                    raise ValidationError("BMC không hợp lệ")
+                if key not in keys:
+                    raise PermissionError("BMC này không thuộc tài khoản của bạn")
+                b = st.get_bmc(*key)
+                domain = st.sites[key[0]]["domain"]
+                if not b.get("auth", True):
+                    return self.send(200, {"url": f"https://{domain}:{key[1]}/"})
+                token = secrets.token_urlsafe(24)
+                now = time.time()
+                with st.lock:
+                    # moi lan mo cap link moi 4 gio; link cong khach hang cu cua cung BMC + nguoi thi thu hoi
+                    for g in st.guests.values():
+                        if g.get("portal") == u["name"] and (g["site"], g["port"]) == key and not g.get("revoked"):
+                            g["revoked"], g["revoked_by"] = True, "cổng khách hàng"
+                    for old in [i for i, g in st.guests.items() if g["exp"] < now - 30 * 86400]:
+                        del st.guests[old]
+                    gid = secrets.token_hex(6)
+                    st.guests[gid] = {"hash": hash_token(token), "site": key[0], "port": key[1],
+                                      "label": f"KH {u.get('full_name') or u['name']}"[:60], "exp": now + 4 * 3600,
+                                      "created_at": now_iso(), "created_by": u["name"], "portal": u["name"]}
+                    st.save("guests.json")
+                st.audit(u["name"], "portal-open", f"cổng {key[1]}", key[0])
+                return self.send(200, {"url": f"https://{domain}:{key[1]}{GUEST_PATH}?t={token}",
+                                       "site_online": app.online(key[0])})
+            return self.err(404, "Không tìm thấy API")
+
+        def api_maint(self, method, mid, u):
+            if method == "GET" and mid is None:
+                rows = [app.maint_view(i, m) for i, m in st.maint.items() if app.can_view(u, m["site"])]
+                now_rows = sorted((r for r in rows if r["status"] != "done"), key=lambda r: (r["status"] != "active", r["start"]))
+                done = sorted((r for r in rows if r["status"] == "done"), key=lambda r: r["end"], reverse=True)
+                return self.send(200, now_rows + done)
+            if method == "POST" and mid is None:
+                data = self.body_json(5000)
+                site = str(data.get("site", ""))
+                if site not in st.sites:
+                    raise ValidationError("Không có site này")
+                app.need_edit(u, site)
+                port = int(data.get("port") or 0)
+                if port and not st.get_bmc(site, port):
+                    raise ValidationError(f"Site {site} không có BMC cổng {port}")
+                start, end = str(data.get("start", ""))[:16], str(data.get("end", ""))[:16]
+                for v in (start, end):
+                    try:
+                        dt.datetime.strptime(v, "%Y-%m-%dT%H:%M")
+                    except ValueError:
+                        raise ValidationError("Thời gian dạng YYYY-MM-DDTHH:MM")
+                if end <= start:
+                    raise ValidationError("Kết thúc phải sau bắt đầu")
+                if end <= app._now_local():
+                    raise ValidationError("Lịch bảo trì đã kết thúc trong quá khứ")
+                mid = secrets.token_hex(5)
+                with st.lock:
+                    cutoff = (dt.datetime.now() - dt.timedelta(days=90)).strftime("%Y-%m-%dT%H:%M")
+                    for old in [i for i, m in st.maint.items() if m["end"] < cutoff]:  # giu lich cu 90 ngay
+                        del st.maint[old]
+                    st.maint[mid] = {"site": site, "port": port, "start": start, "end": end,
+                                     "note": clean_text(data.get("note", ""), 120), "created_by": u["name"],
+                                     "created_at": now_iso()}
+                    st.save("maint.json")
+                st.audit(u["name"], "maint-add", f"{'cổng ' + str(port) if port else 'cả site'} {start} → {end}"
+                         + (f" · {st.maint[mid]['note']}" if st.maint[mid]["note"] else ""), site)
+                return self.send(201, app.maint_view(mid, st.maint[mid]))
+            if method == "DELETE" and mid:
+                m = st.maint.get(mid)
+                if not m:
+                    return self.err(404, "Không có lịch này")
+                app.need_edit(u, m["site"])
+                with st.lock:
+                    if m["start"] <= app._now_local() < m["end"]:  # dang dien ra -> ket thuc ngay (giu lich su)
+                        m["end"] = app._now_local()
+                        m["ended_by"] = u["name"]
+                    else:
+                        del st.maint[mid]
+                    st.save("maint.json")
+                st.audit(u["name"], "maint-end", f"{'cổng ' + str(m.get('port')) if m.get('port') else 'cả site'}", m["site"])
+                return self.send(200, {"ok": True})
+            return self.err(404, "Không tìm thấy API")
 
         def api_guests(self, method, gid, u):
             if method == "GET" and gid is None:
@@ -1569,6 +1733,8 @@ def make_handler(app):
             if not ((token and hmac.compare_digest(token, given)) or name):
                 return self.err(401, "Sai token")
             u = app.user(name) if name else {"role": "admin", "sites": [], "name": "zabbix"}
+            if u["role"] == "customer":
+                return self.err(403, "Không có quyền")
             if self.query.get("type") == ["sites"]:
                 return self.send(200, [{
                     "site": s["key"], "online": int(s["online"]), "phase": s["phase"],
@@ -1602,6 +1768,12 @@ def make_handler(app):
 
             if res == "me" and method == "GET":
                 return self.send(200, {**u, "version": VERSION})
+            if u["role"] == "customer" and res not in ("logout", "password", "2fa", "my"):
+                raise PermissionError("Tài khoản khách hàng chỉ dùng trang BMC của tôi")
+            if res == "my":
+                return self.api_my(method, a1, u)
+            if res == "maint":
+                return self.api_maint(method, a1, u)
             if res == "logout" and method == "POST":
                 app.drop_session(self.cookie_token())
                 return self.send(200, {"ok": True},
@@ -2210,6 +2382,7 @@ def make_handler(app):
                     "last_login": r.get("last_login"), "created_at": r.get("created_at", ""),
                     "created_by": r.get("created_by", ""), "password_changed": r.get("password_changed", ""),
                     "source": r.get("source", "local"), "ldap_groups": r.get("ldap_groups") or [],
+                    "bmc_tags": r.get("bmc_tags") or [], "bmc_list": r.get("bmc_list") or [],
                     "sessions": app.user_sessions(n)}
 
         @staticmethod
@@ -2312,7 +2485,20 @@ def make_handler(app):
             if role not in ROLES:
                 raise ValidationError("Vai trò không hợp lệ")
             sites = [s for s in (data.get("sites") or []) if s in st.sites]
-            return {"role": role, "sites": [] if role == "admin" else sites}
+            if role != "customer":
+                return {"role": role, "sites": [] if role == "admin" else sites, "bmc_tags": [], "bmc_list": []}
+            tags = parse_tags(data.get("bmc_tags") or "")
+            raw = data.get("bmc_list") or ""
+            items = [x.strip() for x in (re.split(r"[\s,;]+", raw) if isinstance(raw, str) else raw) if str(x).strip()]
+            bmc_list = []
+            for x in items:
+                m = re.fullmatch(r"([a-z0-9-]{1,40}):(\d{1,5})", str(x))
+                if not m or not st.get_bmc(m.group(1), int(m.group(2))):
+                    raise ValidationError(f"BMC '{x}' không có (dạng site:cổng, vd hcm:8001)")
+                bmc_list.append(f"{m.group(1)}:{int(m.group(2))}")
+            if not tags and not bmc_list:
+                raise ValidationError("Khách hàng: nhập nhãn BMC (vd KH-ABC) hoặc danh sách BMC (site:cổng)")
+            return {"role": role, "sites": [], "bmc_tags": tags, "bmc_list": bmc_list}
 
         # ------------------------------------------------------------ tong hop
         def overview(self, u):
@@ -2350,6 +2536,10 @@ def make_handler(app):
                                   "Chạy lại: sudo bash install.sh db"})
             for k in app.visible_sites(u):
                 s = app.site_status(k)
+                m = app.maint_active(k)
+                if m:
+                    w.append({"level": "info", "site": k, "text": f"Đang bảo trì đến {m['end'].replace('T', ' ')}"
+                              + (f" · {m['note']}" if m.get("note") else "") + " (không gửi cảnh báo)"})
                 if not s["token_set"]:
                     w.append({"level": "warn", "site": k, "text": "Chưa tạo token cho agent"})
                 elif not s["online"]:
