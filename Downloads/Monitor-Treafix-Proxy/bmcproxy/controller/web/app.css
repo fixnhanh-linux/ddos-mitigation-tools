@@ -743,3 +743,19 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
   .head-actions { gap: 6px; }
   .page-head h1, #page-title { font-size: 21px; }
 }
+
+/* ---------- the site tren dien thoai ---------- */
+@media (max-width: 640px) {
+  .site-card header { padding: 12px 14px 8px; }
+  .site-card .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .site-card .stats div { padding: 8px 10px; }
+  .site-card .stats b { font-size: 16px; }
+  .site-card .stats span { font-size: 11px; line-height: 1.25; display: block; }
+  .site-card .body { padding: 10px 14px; }
+  .site-card .body .row > span:first-child { width: 92px; }
+  .site-card .body a { overflow-wrap: anywhere; }
+  .site-card footer.site-actions { padding: 10px 12px 12px; gap: 8px; }
+  .sa-main { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; }
+  .sa-main > .btn { padding: 8px 6px; font-size: 13px; gap: 4px; }
+  .sa-tools .btn { padding: 5px 9px; font-size: 12px; }
+}
