@@ -174,6 +174,65 @@ class AuditRotateTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class DbStorageTest(unittest.TestCase):
+    """Bat DB (SQLite thay MySQL): moi du lieu nam trong DB - xoa het file JSON van chay du."""
+
+    def test_everything_in_db(self):
+        from gw_common import hash_password
+        from gw_controller import App, Store, load_controller_config
+        tmp = tempfile.mkdtemp(prefix="bmcproxy-db-")
+        try:
+            data, bk = os.path.join(tmp, "data"), os.path.join(tmp, "bk")
+            cfgp = os.path.join(tmp, "config.json")
+            with open(cfgp, "w") as f:
+                json.dump({"data_dir": data, "backup_dir": bk}, f)
+            # 1. ban cu chay JSON: co site, BMC, release, sao luu, phien
+            st = Store(load_controller_config(cfgp))
+            st.users["admin"] = {**hash_password("x" * 12), "role": "admin", "sites": []}
+            st.save("users.json")
+            app = App(st)
+            st.sites["hcm"] = {"key": "hcm", "label": "HCM", "domain": "p.example.net", "overrides": {}}
+            st.save("sites.json")
+            st.bmcs.append({**__import__("gw_common").BMC_DEFAULTS, "site": "hcm", "port": 8001, "upstream": "https://10.0.0.5"})
+            st.save("bmc.json")
+            app.release("hcm", "admin")
+            rev = st.state["hcm"]["target"]["rev"]
+            b1 = app.snapshot("test")
+            tok = app.new_session("admin")
+            # 2. bat DB -> tu chuyen file len DB
+            with open(cfgp, "w") as f:
+                json.dump({"data_dir": data, "backup_dir": bk, "db": {"type": "sqlite", "path": os.path.join(tmp, "x.db")}}, f)
+            st2 = Store(load_controller_config(cfgp))
+            counts = st2.db.blob_counts()
+            self.assertEqual((counts.get("release"), counts.get("backup"), counts.get("session")), (1, 1, 1))
+            # 3. xoa sach file (nhu may web moi chi co DB): van doc duoc tat ca
+            shutil.rmtree(data)
+            shutil.rmtree(bk)
+            os.makedirs(os.path.join(data, "releases"))
+            os.makedirs(bk)
+            st3 = Store(load_controller_config(cfgp))
+            app3 = App(st3)
+            self.assertEqual(app3.session_user(tok), "admin")
+            self.assertIn("hcm", st3.sites)
+            self.assertEqual(len(st3.bmcs), 1)
+            self.assertIsNotNone(st3.load_release("hcm", rev))
+            self.assertEqual([b["name"] for b in app3.list_backups()], [b1])
+            st3.bmcs.clear()
+            st3.save("bmc.json")
+            app3.restore(b1, "admin")
+            self.assertEqual(len(st3.bmcs), 1)
+            names = [b["name"] for b in app3.list_backups()]
+            self.assertEqual(len(names), 2)                    # + ban "before-restore"
+            self.assertEqual(st3.db.blob_counts()["backup"], 2)
+            info = st3.storage_info()
+            self.assertEqual(info["kind"], "sqlite")
+            self.assertGreaterEqual(info["audit"], 1)
+            st3.db.conn.close()
+            st2.db.conn.close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class LdapMockTest(unittest.TestCase):
     def setUp(self):
         import gw_ldap

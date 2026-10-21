@@ -1291,6 +1291,13 @@ function renderSettings() {
   $("#server-info").innerHTML = [
     ["Phiên bản", r.version], ["Tài khoản", `${state.me.name} (${ROLE_LABEL[state.me.role]})`],
     ["Agent mất liên lạc sau", `${r.offline_after} giây không báo về`],
+    ...(r.storage ? [["Lưu dữ liệu", r.storage.kind === "json"
+      ? "file JSON trên server (chưa dùng DB - chạy install.sh db)"
+      : `${r.storage.describe}${r.storage.kind === "mysql" ? (r.storage.tls ? " · TLS" : " · chưa mã hoá") : ""}`],
+    ...(r.storage.kind !== "json" ? [["Trong DB", `${r.storage.docs ?? "?"} bảng dữ liệu · ${r.storage.audit ?? "?"} dòng nhật ký · `
+      + `${(r.storage.blobs || {}).release || 0} bản cấu hình · ${(r.storage.blobs || {}).backup || 0} bản sao lưu · `
+      + `${(r.storage.blobs || {}).session ? "có" : "chưa có"} phiên đăng nhập`]] : []),
+    ...(r.storage.error ? [["Lỗi DB", r.storage.error]] : [])] : []),
     ["API Zabbix", r.zabbix_enabled ? "/api/zabbix · /api/zabbix?type=sites (header X-Api-Token)" : "tắt — đặt zabbix_token trong config.json"],
   ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 }

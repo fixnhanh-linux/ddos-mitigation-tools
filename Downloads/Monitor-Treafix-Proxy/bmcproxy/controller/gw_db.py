@@ -7,7 +7,8 @@ config.json:
     ssl true = ma hoa ket noi (MySQL 8 co san TLS). ssl_verify + ssl_ca = kiem tra chung chi MySQL (CA rieng).
 
 Moi "file" cu (bmc.json, sites.json, users.json...) la 1 dong trong bang bmcproxy_docs (JSON + so phien ban),
-nhat ky nam o bang bmcproxy_audit. "type": "sqlite" (+ "path") dung de thu nghiem khong can MySQL.
+nhat ky nam o bang bmcproxy_audit; ban cau hinh da phat hanh (release), ban sao luu, phien dang nhap
+nam o bang bmcproxy_blobs (kind + name). "type": "sqlite" (+ "path") dung de thu nghiem khong can MySQL.
 Can thu vien PyMySQL:  apt install -y python3-pymysql
 """
 
@@ -19,6 +20,7 @@ from gw_common import ValidationError
 
 DOCS = "bmcproxy_docs"
 AUDIT = "bmcproxy_audit"
+BLOBS = "bmcproxy_blobs"
 
 
 def db_password(c):
@@ -115,12 +117,21 @@ class DocDB:
                 detail TEXT,
                 KEY idx_ts (ts)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+            self._exec(f"""CREATE TABLE IF NOT EXISTS {BLOBS} (
+                kind VARCHAR(16) NOT NULL,
+                name VARCHAR(160) NOT NULL,
+                data LONGTEXT NOT NULL,
+                updated_at DATETIME NOT NULL,
+                PRIMARY KEY (kind, name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         else:
             self._exec(f"CREATE TABLE IF NOT EXISTS {DOCS} (name TEXT PRIMARY KEY, data TEXT NOT NULL, "
                        "version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL)")
             self._exec(f"CREATE TABLE IF NOT EXISTS {AUDIT} (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, "
                        "user TEXT NOT NULL DEFAULT '', action TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '', "
                        "detail TEXT)")
+            self._exec(f"CREATE TABLE IF NOT EXISTS {BLOBS} (kind TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL, "
+                       "updated_at TEXT NOT NULL, PRIMARY KEY (kind, name))")
 
     # ------------------------------------------------------------ tai lieu
     def versions(self):
@@ -148,6 +159,39 @@ class DocDB:
                        "updated_at = datetime('now')", (name, data))
         rows = self._exec(f"SELECT version FROM {DOCS} WHERE name = {p}", (name,), fetch=True)
         return int(rows[0][0]) if rows else None
+
+    # ------------------------------------------------------------ blob (release / sao luu / phien)
+    def blob_put(self, kind, name, obj):
+        data = json.dumps(obj, ensure_ascii=False, sort_keys=True)
+        p = self.ph
+        if self.kind == "mysql":
+            self._exec(f"INSERT INTO {BLOBS} (kind, name, data, updated_at) VALUES ({p}, {p}, {p}, NOW()) "
+                       "ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = NOW()", (kind, name, data))
+        else:
+            self._exec(f"INSERT INTO {BLOBS} (kind, name, data, updated_at) VALUES ({p}, {p}, {p}, datetime('now')) "
+                       "ON CONFLICT(kind, name) DO UPDATE SET data = excluded.data, updated_at = datetime('now')",
+                       (kind, name, data))
+
+    def blob_get(self, kind, name, default=None):
+        p = self.ph
+        rows = self._exec(f"SELECT data FROM {BLOBS} WHERE kind = {p} AND name = {p}", (kind, name), fetch=True)
+        try:
+            return json.loads(rows[0][0]) if rows else default
+        except ValueError:
+            return default
+
+    def blob_names(self, kind, prefix=""):
+        p = self.ph
+        rows = self._exec(f"SELECT name FROM {BLOBS} WHERE kind = {p} AND name LIKE {p} ORDER BY name",
+                          (kind, prefix.replace("%", "").replace("_", "\\_") + "%"), fetch=True)
+        return [r[0] for r in rows]
+
+    def blob_delete(self, kind, name):
+        p = self.ph
+        self._exec(f"DELETE FROM {BLOBS} WHERE kind = {p} AND name = {p}", (kind, name))
+
+    def blob_counts(self):
+        return {r[0]: int(r[1]) for r in self._exec(f"SELECT kind, COUNT(*) FROM {BLOBS} GROUP BY kind", fetch=True)}
 
     # ------------------------------------------------------------ nhat ky
     def audit_add(self, rec):

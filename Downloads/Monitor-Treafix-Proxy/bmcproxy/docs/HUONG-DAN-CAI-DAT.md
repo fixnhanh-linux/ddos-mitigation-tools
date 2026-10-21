@@ -844,7 +844,18 @@ EOF
 
 ## 19. Lưu dữ liệu web vào MySQL (tuỳ chọn)
 
-Mặc định web lưu vào file JSON trong `/opt/bmcproxy/data/`. Bật MySQL thì danh sách BMC, site, người dùng, cài đặt, mẫu và nhật ký nằm trong MySQL; file JSON vẫn được ghi song song làm bản dự phòng (Sao lưu / Khôi phục vẫn dùng được).
+Mặc định web lưu vào file JSON trong `/opt/bmcproxy/data/`. Bật MySQL thì **toàn bộ dữ liệu của web** nằm trong MySQL, file JSON chỉ còn là bản sao dự phòng:
+
+| Dữ liệu (menu trên web) | Bảng MySQL |
+|---|---|
+| BMC, Site (kể cả token agent đã băm), Mẫu BMC, Cài đặt, Người dùng (mật khẩu băm, 2FA), cài đặt AD, trạng thái áp dụng | `bmcproxy_docs` |
+| Nhật ký (mọi thao tác, lịch sử đăng nhập, lịch sử từng BMC) | `bmcproxy_audit` |
+| Bản cấu hình đã phát hành cho từng site (Lịch sử → Quay về), Sao lưu, phiên đăng nhập | `bmcproxy_blobs` |
+
+Không nằm trong MySQL (không cần giữ): trạng thái agent gửi lên mỗi 10 giây, mã cài agent 1 dòng (hết hạn sau 1 giờ), bộ đếm sai mật khẩu.
+Trên mỗi server site, agent giữ riêng bản sao config Traefik của chính server đó.
+
+Cài web mới chỉ cần trỏ tới cùng MySQL là có lại đủ dữ liệu, kể cả Sao lưu và phiên đăng nhập. Trang **Cài đặt → Thông tin** ghi rõ đang lưu ở đâu, có mã hoá TLS chưa và số dòng trong DB.
 
 ### 19.1. Trên máy MySQL
 
@@ -871,7 +882,7 @@ Script hỏi host / cổng / tài khoản / database / **mật khẩu (bạn t�
 - thử kết nối và quyền tạo bảng;
 - sửa `config.json` (khối `"db"`), restart web.
 
-Lần đầu web **tự chuyển dữ liệu JSON hiện có sang MySQL** (log: `đã chuyển … sang mysql …`).
+Lần đầu web **tự chuyển dữ liệu hiện có sang MySQL** (log: `đã chuyển … sang mysql …`). Web đã dùng MySQL từ bản trước: khi cập nhật, bản cấu hình đã phát hành, sao lưu và phiên đăng nhập trong file cũng được tự chuyển lên (log: `đã chuyển lên mysql …: … bản cấu hình, … bản sao lưu`).
 
 ```bash
 sudo journalctl -u bmcproxy -n 20 --no-pager | grep -E "dữ liệu:|đã chuyển"   # dữ liệu: mysql bmcproxy@…

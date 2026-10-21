@@ -132,6 +132,15 @@ def tail_lines(path, n, block=65536):
     return [ln.decode("utf-8", "replace") for ln in data.splitlines()[-n:] if ln.strip()]
 
 
+def read_backup_dir(path):
+    """Thu muc sao luu (meta.json + bmc/settings/sites.json) -> {"meta", "docs"} | None."""
+    meta = read_json(os.path.join(path, "meta.json"), None)
+    if meta is None:
+        return None
+    return {"meta": meta, "docs": {n: read_json(os.path.join(path, n), None) for n in
+                                   ("bmc.json", "settings.json", "sites.json") if os.path.isfile(os.path.join(path, n))}}
+
+
 class Store:
     FILES = ("bmc.json", "settings.json", "sites.json", "users.json", "state.json", "templates.json", "auth.json")
 
@@ -154,6 +163,7 @@ class Store:
     # ------------------------------------------------------------ MySQL
     def _import_json_to_db(self):
         """Lan dau bat MySQL: chuyen file JSON + audit.log hien co len DB (chi khi DB con trong)."""
+        self._import_blobs_to_db()
         if self.db.versions():
             return
         n = 0
@@ -174,6 +184,66 @@ class Store:
             pass
         if n or a:
             print(f"đã chuyển {n} file dữ liệu + {a} dòng nhật ký từ JSON sang {self.db.describe()}", flush=True)
+
+    def _import_blobs_to_db(self):
+        """Ban cau hinh da phat hanh, ban sao luu, phien dang nhap tu file -> bang blob (1 lan)."""
+        if self.db.blob_counts():
+            return
+        n = {"release": 0, "backup": 0, "session": 0}
+        rdir = self._p("releases")
+        for site in sorted(os.listdir(rdir)) if os.path.isdir(rdir) else []:
+            for f in sorted(os.listdir(os.path.join(rdir, site))):
+                rel = read_json(os.path.join(rdir, site, f), None) if f.endswith(".json") else None
+                if rel is not None:
+                    self.db.blob_put("release", f"{site}/{f[:-5]}", rel)
+                    n["release"] += 1
+        bdir = self.cfg["backup_dir"]
+        for d in sorted(os.listdir(bdir)) if os.path.isdir(bdir) else []:
+            snap = read_backup_dir(os.path.join(bdir, d))
+            if snap:
+                self.db.blob_put("backup", d, snap)
+                n["backup"] += 1
+        sess = read_json(self._p("sessions.json"), {})
+        if sess:
+            self.db.blob_put("session", "all", sess)
+            n["session"] = len(sess)
+        if any(n.values()):
+            print(f"đã chuyển lên {self.db.describe()}: {n['release']} bản cấu hình, {n['backup']} bản sao lưu, "
+                  f"{n['session']} phiên đăng nhập", flush=True)
+
+    # ------------------------------------------------------------ blob: DB (neu bat) + file ban sao
+    def blob_put(self, kind, name, obj, path=None, mode=0o644):
+        if path:
+            write_json(path, obj, mode)
+        if self.db:
+            try:
+                self.db.blob_put(kind, name, obj)
+                self.db_error = ""
+            except Exception as e:
+                self.db_error = f"{type(e).__name__}: {e}"
+
+    def blob_get(self, kind, name, path=None, default=None):
+        if self.db:
+            try:
+                v = self.db.blob_get(kind, name)
+                if v is not None:
+                    return v
+            except Exception as e:
+                self.db_error = f"{type(e).__name__}: {e}"
+        return read_json(path, default) if path else default
+
+    def storage_info(self):
+        out = {"kind": "json", "describe": f"file JSON ({self.dir})", "error": self.db_error}
+        if self.db:
+            out["kind"], out["describe"] = self.db.kind, self.db.describe()
+            try:
+                out["docs"] = len(self.db.versions())
+                out["audit"] = self.db.audit_count()
+                out["blobs"] = self.db.blob_counts()
+                out["tls"] = bool((self.cfg.get("db") or {}).get("ssl"))
+            except Exception as e:
+                out["error"] = f"{type(e).__name__}: {e}"
+        return out
 
     def _apply_docs(self, docs):
         self.bmcs = docs.get("bmc.json", {"bmcs": []}).get("bmcs", [])
@@ -345,7 +415,7 @@ class Store:
     def load_release(self, site, rev):
         if not rev or not re.match(r"^[0-9a-f]{12}$", rev):
             return None
-        return read_json(self._p("releases", site, f"{rev}.json"), None)
+        return self.blob_get("release", f"{site}/{rev}", self._p("releases", site, f"{rev}.json"))
 
     def get_bmc(self, site, port):
         for b in self.bmcs:
@@ -384,7 +454,7 @@ class App:
 
     def _load_sessions(self):
         now = time.time()
-        raw = read_json(os.path.join(self.store.dir, "sessions.json"), {})
+        raw = self.store.blob_get("session", "all", os.path.join(self.store.dir, "sessions.json"), {})
         return {h: tuple(v) for h, v in raw.items() if isinstance(v, list) and len(v) >= 5 and v[1] > now}
 
     def _save_sessions(self):
@@ -393,7 +463,8 @@ class App:
         for h in [h for h, s in self.sessions.items() if s[1] < now]:
             del self.sessions[h]
         try:
-            write_json(self._sessions_path(), {h: list(s) for h, s in self.sessions.items()}, 0o600)
+            self.store.blob_put("session", "all", {h: list(s) for h, s in self.sessions.items()},
+                                self._sessions_path(), 0o600)
         except OSError as e:
             sys.stderr.write(f"không lưu được sessions.json: {e}\n")
 
@@ -737,8 +808,9 @@ class App:
                     self.site_status(site)["phase"] in ("synced", "applying"):
                 return False
             path = st._p("releases", site, f"{rel['rev']}.json")
-            if not os.path.isfile(path):
-                write_json(path, {**rel, "created_at": now_iso(), "created_by": user})
+            if st.load_release(site, rel["rev"]) is None:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                st.blob_put("release", f"{site}/{rel['rev']}", {**rel, "created_at": now_iso(), "created_by": user}, path)
             state["target"] = {"rev": rel["rev"], "attempt": int(target.get("attempt", 0)) + 1,
                                "at": now_iso(), "by": user}
             st.save("state.json")
@@ -778,39 +850,61 @@ class App:
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
         dest = os.path.join(bdir, f"{stamp}-{re.sub(r'[^a-z0-9-]', '', label)[:20]}")
         os.makedirs(dest)
-        for name in ("bmc.json", "settings.json", "sites.json"):
-            if os.path.isfile(st._p(name)):
-                shutil.copy2(st._p(name), os.path.join(dest, name))
-        write_json(os.path.join(dest, "meta.json"), {
-            "label": label, "ts": now_iso(), "bmcs": len(st.bmcs),
-            "sites": {k: sum(1 for b in st.bmcs if b["site"] == k) for k in st.sites}})
+        meta = {"label": label, "ts": now_iso(), "bmcs": len(st.bmcs),
+                "sites": {k: sum(1 for b in st.bmcs if b["site"] == k) for k in st.sites}}
+        docs = {"bmc.json": {"bmcs": sorted(st.bmcs, key=bmc_key)}, "settings.json": st.settings, "sites.json": st.sites}
+        for name, obj in docs.items():
+            write_json(os.path.join(dest, name), obj, 0o600 if name == "sites.json" else 0o644)
+        write_json(os.path.join(dest, "meta.json"), meta)
+        name = os.path.basename(dest)
+        st.blob_put("backup", name, {"meta": meta, "docs": docs})
         backups = sorted(d for d in os.listdir(bdir) if os.path.isdir(os.path.join(bdir, d)))
         for old in backups[:-MAX_BACKUPS]:
             shutil.rmtree(os.path.join(bdir, old), ignore_errors=True)
-        return os.path.basename(dest)
+        if st.db:
+            try:
+                for old in st.db.blob_names("backup")[:-MAX_BACKUPS]:
+                    st.db.blob_delete("backup", old)
+            except Exception as e:
+                st.db_error = f"{type(e).__name__}: {e}"
+        return name
 
     def list_backups(self):
-        bdir = self.store.cfg["backup_dir"]
-        out = []
-        for d in sorted(os.listdir(bdir), reverse=True):
+        st = self.store
+        bdir = st.cfg["backup_dir"]
+        found = {}
+        for d in os.listdir(bdir):
             meta = read_json(os.path.join(bdir, d, "meta.json"), None)
             if meta is not None:
-                out.append({"name": d, **meta})
-        return out
+                found[d] = meta
+        if st.db:  # DB la nguon chinh: may web moi (chua co thu muc backups) van thay ban sao luu
+            try:
+                for d in st.db.blob_names("backup"):
+                    if d not in found:
+                        found[d] = (st.db.blob_get("backup", d) or {}).get("meta") or {}
+            except Exception as e:
+                st.db_error = f"{type(e).__name__}: {e}"
+        return [{"name": d, **found[d]} for d in sorted(found, reverse=True)]
+
+    def read_backup(self, name):
+        st = self.store
+        snap = st.blob_get("backup", name)
+        return snap or read_backup_dir(os.path.join(st.cfg["backup_dir"], name))
 
     def restore(self, name, user):
         if not re.match(r"^[0-9A-Za-z-]+$", name):
             raise ValidationError("Tên bản sao lưu không hợp lệ")
         st = self.store
-        src = os.path.join(st.cfg["backup_dir"], name)
-        if not os.path.isfile(os.path.join(src, "meta.json")):
+        snap = self.read_backup(name)
+        if not snap:
             raise ValidationError("Không tìm thấy bản sao lưu")
+        docs = snap["docs"]
         with st.lock:
             current = self.snapshot("before-restore")
-            st.bmcs = read_json(os.path.join(src, "bmc.json"), {"bmcs": []}).get("bmcs", [])
-            st.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in read_json(
-                os.path.join(src, "settings.json"), {}).items() if k in SETTINGS_DEFAULTS}}
-            old_sites = read_json(os.path.join(src, "sites.json"), {})
+            st.bmcs = (docs.get("bmc.json") or {"bmcs": []}).get("bmcs", [])
+            st.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in (docs.get("settings.json") or {}).items()
+                                                   if k in SETTINGS_DEFAULTS}}
+            old_sites = docs.get("sites.json") or {}
             for k, s in old_sites.items():
                 if k in st.sites:  # giu token hien tai de agent khong bi mat ket noi
                     s["token_hash"] = st.sites[k].get("token_hash", "")
@@ -1318,6 +1412,7 @@ def make_handler(app):
                     return self.send(200, {"settings": st.settings, "overridable": OVERRIDABLE,
                                            "zabbix_enabled": bool(st.cfg.get("zabbix_token")),
                                            "offline_after": st.cfg["agent_offline_after"],
+                                           "storage": st.storage_info() if u["role"] == "admin" else None,
                                            "version": VERSION})
                 if method == "PUT":
                     app.need_admin(u)
