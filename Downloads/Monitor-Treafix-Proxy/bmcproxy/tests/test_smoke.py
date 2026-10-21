@@ -110,6 +110,11 @@ class WebTest(unittest.TestCase):
     def test_3_login_info(self):
         self.assertEqual(self.req("GET", "/api/login-info", cookie="")[2], {"ldap": False, "domain": ""})
 
+    def test_3b_audit_has_ip(self):
+        rows = self.req("GET", "/api/audit?limit=100")[2]
+        login = next(r for r in rows if r["action"] == "login" and r["user"] == "admin")
+        self.assertEqual(login["ip"], "127.0.0.1")
+
     def test_4_password_change_drops_other_sessions(self):
         from gw_common import hash_password
         pw = "U-" + secrets.token_hex(8)
@@ -224,6 +229,8 @@ class DbStorageTest(unittest.TestCase):
             names = [b["name"] for b in app3.list_backups()]
             self.assertEqual(len(names), 2)                    # + ban "before-restore"
             self.assertEqual(st3.db.blob_counts()["backup"], 2)
+            st3.audit("admin", "test", "x", ip="10.1.2.3")
+            self.assertEqual(st3.read_audit(1)[0]["ip"], "10.1.2.3")
             info = st3.storage_info()
             self.assertEqual(info["kind"], "sqlite")
             self.assertGreaterEqual(info["audit"], 1)

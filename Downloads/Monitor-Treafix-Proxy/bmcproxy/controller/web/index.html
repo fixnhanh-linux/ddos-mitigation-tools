@@ -193,9 +193,19 @@
 
     <!-- Nhật ký -->
     <section class="page hidden" id="page-audit">
-      <div class="toolbar"><select id="audit-site" aria-label="Lọc site"><option value="">Mọi site</option></select></div>
+      <div class="toolbar audit-tools">
+        <input id="audit-q" type="search" placeholder="Tìm IP, người dùng, chi tiết…" aria-label="Tìm trong nhật ký">
+        <select id="audit-site" aria-label="Lọc site"><option value="">Mọi site</option></select>
+        <select id="audit-user" aria-label="Lọc người dùng"><option value="">Mọi người dùng</option></select>
+        <select id="audit-kind" aria-label="Lọc loại thao tác"><option value="">Mọi thao tác</option>
+          <option value="login">Đăng nhập / đăng xuất</option><option value="fail">Đăng nhập thất bại</option>
+          <option value="bmc">BMC</option><option value="site">Site / agent</option><option value="apply">Áp dụng / quay về</option>
+          <option value="user">Người dùng / mật khẩu / 2FA</option><option value="system">Cài đặt / sao lưu / AD</option></select>
+        <span id="audit-count" class="hint"></span>
+        <button class="btn" id="btn-audit-csv" type="button">Xuất CSV</button>
+      </div>
       <div class="panel flush"><div class="table-wrap">
-        <table class="table"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>Site</th><th>Thao tác</th><th>Chi tiết</th></tr></thead>
+        <table class="table"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>IP · trình duyệt</th><th>Site</th><th>Thao tác</th><th>Chi tiết</th></tr></thead>
           <tbody id="audit-list"></tbody></table>
       </div></div>
     </section>

@@ -585,3 +585,9 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
 #ldap-form textarea { min-height: 52px; }
 .ldap-test { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line, #d5dbe2); }
 #login-ad-hint { margin: 10px 0 0; text-align: center; }
+
+.audit-tools { flex-wrap: wrap; gap: 8px; }
+.audit-tools #audit-q { min-width: 240px; flex: 1 1 240px; }
+.audit-tools #audit-count { margin-left: auto; }
+#audit-list td:first-child { white-space: nowrap; }
+#audit-list td:nth-child(3) { white-space: nowrap; }

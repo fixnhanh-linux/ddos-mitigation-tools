@@ -1059,15 +1059,68 @@ async function loadTraefik() {
 }
 
 // ------------------------------------------------------------------ Nhật ký
-$("#audit-site").addEventListener("input", loadAudit);
+const ACTION_LABEL = {
+  login: "Đăng nhập", "login-fail": "Đăng nhập thất bại", "user-logout": "Đăng xuất (bắt buộc)", password: "Đổi mật khẩu",
+  "2fa-on": "Bật 2FA", "2fa-off": "Tắt 2FA", "user-add": "Thêm tài khoản", "user-edit": "Sửa tài khoản",
+  "user-delete": "Xoá tài khoản", adduser: "Tạo tài khoản (lệnh)", "bmc-add": "Thêm BMC", "bmc-edit": "Sửa BMC",
+  "bmc-delete": "Xoá BMC", "bmc-bulk": "Sửa hàng loạt", import: "Nhập từ nginx", "site-add": "Thêm site",
+  "site-edit": "Sửa site", "site-delete": "Xoá site", "site-token": "Đổi token agent", "site-install-code": "Tạo lệnh cài agent",
+  "site-install": "Cài agent", "agent-online": "Agent kết nối", apply: "Áp dụng", "apply-ok": "Áp dụng xong",
+  "apply-failed": "Áp dụng lỗi", rollback: "Quay về bản cũ", settings: "Đổi cài đặt", restore: "Khôi phục sao lưu",
+  "template-save": "Lưu mẫu", "template-delete": "Xoá mẫu", ldap: "Cài đặt AD", "ldap-test": "Thử đăng nhập AD",
+};
+const AUDIT_KIND = {
+  login: /^(login|user-logout)$/, fail: /^login-fail$/, bmc: /^(bmc-|import$)/, site: /^(site-|agent-)/,
+  apply: /^(apply|rollback)/, user: /^(user-|password$|2fa-|adduser$)/, system: /^(settings|restore|template-|ldap)/,
+};
+let auditRows = [];
+["#audit-site", "#audit-user", "#audit-kind"].forEach((id) => $(id).addEventListener("input", renderAudit));
+$("#audit-q").addEventListener("input", renderAudit);
+$("#audit-list").addEventListener("click", (e) => {
+  const ip = e.target.closest("[data-audit-ip]");
+  if (ip) { $("#audit-q").value = ip.dataset.auditIp; renderAudit(); }
+});
 async function loadAudit() {
-  const site = $("#audit-site").value;
-  const list = (await api("GET", "audit")).filter((a) => !site || a.site === site);
-  $("#audit-list").innerHTML = list.map((a) => `<tr><td class="mono">${esc(fmtTs(a.ts))}</td><td>${esc(a.user)}</td>
-    <td>${a.site ? `<span class="tag">${esc(siteLabel(a.site))}</span>` : ""}</td>
-    <td><span class="tag ${/failed|delete/.test(a.action) ? "bad" : /ok|online/.test(a.action) ? "ok" : ""}">${esc(a.action)}</span></td>
-    <td class="cell-sub">${esc(a.detail)}</td></tr>`).join("") || '<tr><td colspan="5" class="hint" style="padding:24px">Chưa có.</td></tr>';
+  auditRows = (await api("GET", "audit?limit=3000")).map((a) => {
+    // dong cu (truoc khi co cot IP): dang nhap ghi IP o dau chi tiet
+    const m = !a.ip && /^login/.test(a.action) && /^([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[0-9a-f:]*:[0-9a-f:]+)(?:\s+|$)/i.exec(a.detail || "");
+    return m ? { ...a, ip: m[1], detail: a.detail.slice(m[0].length) } : a;
+  });
+  const sel = $("#audit-user");
+  const cur = sel.value;
+  const users = [...new Set(auditRows.map((a) => a.user).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Mọi người dùng</option>' + users.map((n) => `<option>${esc(n)}</option>`).join("");
+  sel.value = users.includes(cur) ? cur : "";
+  renderAudit();
 }
+function auditFiltered() {
+  const site = $("#audit-site").value, user = $("#audit-user").value, kind = AUDIT_KIND[$("#audit-kind").value];
+  const q = $("#audit-q").value.trim().toLowerCase();
+  return auditRows.filter((a) => (!site || a.site === site) && (!user || a.user === user) && (!kind || kind.test(a.action))
+    && (!q || [a.ip, a.user, a.detail, a.ua, a.action, ACTION_LABEL[a.action]].some((x) => String(x || "").toLowerCase().includes(q))));
+}
+function renderAudit() {
+  const list = auditFiltered();
+  $("#audit-count").textContent = `${list.length} / ${auditRows.length} dòng`;
+  $("#audit-list").innerHTML = list.slice(0, 1000).map((a) => `<tr><td class="mono">${esc(fmtTs(a.ts))}</td><td>${esc(a.user)}</td>
+    <td>${a.ip ? `<a href="#" class="mono" data-audit-ip="${esc(a.ip)}" title="Lọc theo IP này">${esc(a.ip)}</a>` : `<span class="cell-sub">${a.user === "cli" ? "trên server (lệnh)" : /^(AD|agent|install\.sh)$/.test(a.user) ? "hệ thống" : "chưa ghi (bản cũ)"}</span>`}
+      ${a.ua ? `<div class="cell-sub">${esc(a.ua)}</div>` : ""}</td>
+    <td>${a.site ? `<span class="tag">${esc(siteLabel(a.site))}</span>` : ""}</td>
+    <td><span class="tag ${/fail|delete/.test(a.action) ? "bad" : /ok|online|^login$/.test(a.action) ? "ok" : ""}" title="${esc(a.action)}">${esc(ACTION_LABEL[a.action] || a.action)}</span></td>
+    <td class="cell-sub">${esc(a.detail)}</td></tr>`).join("")
+    || '<tr><td colspan="6" class="hint" style="padding:24px">Không có dòng nào khớp.</td></tr>';
+}
+$("#btn-audit-csv").addEventListener("click", () => {
+  const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [["Thời điểm", "Người dùng", "IP", "Trình duyệt", "Site", "Thao tác", "Mã thao tác", "Chi tiết"].map(cell).join(",")]
+    .concat(auditFiltered().map((a) => [fmtTs(a.ts), a.user, a.ip, a.ua, a.site, ACTION_LABEL[a.action] || a.action, a.action, a.detail].map(cell).join(",")));
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `nhat-ky-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+});
 
 // ------------------------------------------------------------------ Sao lưu
 const BLABEL = { import: "Trước khi nhập nginx", "before-restore": "Trước khi khôi phục", "site-delete": "Trước khi xoá site" };

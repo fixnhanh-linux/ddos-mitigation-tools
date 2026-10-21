@@ -116,6 +116,26 @@ def _diff(old, new, a, b):
 # Du lieu
 # =========================================================================== #
 
+# Yeu cau HTTP dang xu ly tren luong nay -> nhat ky tu ghi IP + trinh duyet cua nguoi thao tac
+REQ = threading.local()
+
+
+def short_agent(ua):
+    """User-Agent -> 'Chrome · Windows' (gon de hien tren nhat ky)."""
+    ua = ua or ""
+    if not ua:
+        return ""
+    if ua.startswith("Python-urllib") or "bmcproxy" in ua.lower():
+        return "agent"
+    if ua.startswith("curl/"):
+        return "curl"
+    browser = next((n for k, n in (("Edg/", "Edge"), ("OPR/", "Opera"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"),
+                                   ("Safari/", "Safari")) if k in ua), "")
+    osn = next((n for k, n in (("Windows", "Windows"), ("Android", "Android"), ("iPhone", "iPhone"), ("iPad", "iPad"),
+                               ("Mac OS X", "macOS"), ("Linux", "Linux")) if k in ua), "")
+    return " · ".join(x for x in (browser, osn) if x) or ua[:40]
+
+
 def tail_lines(path, n, block=65536):
     """n dong cuoi cua file ma khong doc ca file (audit.log co the lon)."""
     try:
@@ -341,8 +361,9 @@ class Store:
                 self.db_error = f"{type(e).__name__}: {e}"
                 raise ValidationError(f"Không ghi được MySQL ({self.db_error}). Dữ liệu đã lưu tạm vào file JSON.")
 
-    def audit(self, user, action, detail="", site=""):
-        rec = {"ts": now_iso(), "user": user, "action": action, "site": site, "detail": detail}
+    def audit(self, user, action, detail="", site="", ip=None):
+        rec = {"ts": now_iso(), "user": user, "action": action, "site": site, "detail": detail,
+               "ip": getattr(REQ, "ip", "") if ip is None else ip, "ua": getattr(REQ, "ua", "")}
         line = json.dumps(rec, ensure_ascii=False)
         with self.lock:
             path = self._p("audit.log")
@@ -1023,6 +1044,8 @@ def make_handler(app):
                 self.end_headers()
                 self.close_connection = True
                 return
+            REQ.ip = self.client_address[0]
+            REQ.ua = short_agent(self.headers.get("User-Agent"))
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             self.query = urllib.parse.parse_qs(parsed.query)
@@ -1202,7 +1225,7 @@ def make_handler(app):
                 if not rec or rec.get("source") == "ldap" or not check_password(rec, password):
                     locked = app.login_failed(ip, name if rec else "")
                     if rec:
-                        st.audit(name, "login-fail", f"{ip} sai mật khẩu"
+                        st.audit(name, "login-fail", "sai mật khẩu"
                                  + (f" - khoá tài khoản {ACCOUNT_LOCK_SECONDS // 60} phút" if locked else ""))
                     return self.err(401, "Sai tài khoản hoặc mật khẩu")
             else:
@@ -1211,7 +1234,7 @@ def make_handler(app):
                     return msg
             reason = app.blocked_reason(rec)
             if reason:
-                st.audit(name, "login-fail", f"{ip} {reason}")
+                st.audit(name, "login-fail", reason)
                 return self.err(403, reason)
             if rec.get("totp_secret"):
                 otp = str(data.get("otp") or "").strip()
@@ -1220,7 +1243,7 @@ def make_handler(app):
                                            "need_otp": True})
                 if not totp_check(rec["totp_secret"], otp):
                     app.login_failed(ip, name)
-                    st.audit(name, "login-fail", f"{ip} sai mã 2FA")
+                    st.audit(name, "login-fail", "sai mã 2FA")
                     return self.send(401, {"error": "Mã xác thực 2 lớp không đúng", "need_otp": True})
             app.login_ok(ip, name)
             app.ldap_checked[name] = time.time()
@@ -1232,7 +1255,9 @@ def make_handler(app):
                     st.save("users.json")
                 except ValidationError:
                     pass
-            st.audit(name, "login", ip)
+            st.audit(name, "login", ", ".join(x for x in (
+                "tài khoản AD" if rec.get("source") == "ldap" else "", "2FA" if rec.get("totp_secret") else "",
+                "ghi nhớ 30 ngày" if remember else "") if x))
             secure = "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""
             # Ghi nho: cookie 30 ngay. Khong: cookie mat khi dong trinh duyet (web gioi han 12 gio)
             cookie = (f"bmcproxy_session={token}; Path={(st.cfg.get('web_path') or '') + '/'}; HttpOnly; SameSite=Strict"
@@ -1254,10 +1279,10 @@ def make_handler(app):
                 if e.kind == "bad":
                     locked = app.login_failed(ip, name)
                     if local:
-                        st.audit(name, "login-fail", f"{ip} AD: {e}"
+                        st.audit(name, "login-fail", f"AD: {e}"
                                  + (f" - khoá {ACCOUNT_LOCK_SECONDS // 60} phút" if locked else ""))
                     return None, None, self.err(401, str(e))
-                st.audit(name, "login-fail", f"{ip} AD: {e}")
+                st.audit(name, "login-fail", f"AD: {e}")
                 if e.kind == "denied":
                     return None, None, self.err(403, str(e))
                 sys.stderr.write(f"AD/LDAP: {e}\n")
@@ -1449,7 +1474,11 @@ def make_handler(app):
             if res == "audit" and method == "GET":
                 if u["role"] == "viewer":
                     raise PermissionError("Không có quyền xem nhật ký")
-                rows = st.read_audit()
+                try:
+                    limit = max(50, min(5000, int((self.query.get("limit") or ["2000"])[0])))
+                except ValueError:
+                    limit = 2000
+                rows = st.read_audit(limit)
                 if u["role"] != "admin" and u["sites"]:
                     rows = [r for r in rows if not r.get("site") or r["site"] in u["sites"]]
                 return self.send(200, rows)

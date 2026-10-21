@@ -115,6 +115,8 @@ class DocDB:
                 action VARCHAR(64) NOT NULL DEFAULT '',
                 site VARCHAR(64) NOT NULL DEFAULT '',
                 detail TEXT,
+                ip VARCHAR(64) NOT NULL DEFAULT '',
+                ua VARCHAR(80) NOT NULL DEFAULT '',
                 KEY idx_ts (ts)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
             self._exec(f"""CREATE TABLE IF NOT EXISTS {BLOBS} (
@@ -129,9 +131,26 @@ class DocDB:
                        "version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL)")
             self._exec(f"CREATE TABLE IF NOT EXISTS {AUDIT} (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, "
                        "user TEXT NOT NULL DEFAULT '', action TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '', "
-                       "detail TEXT)")
+                       "detail TEXT, ip TEXT NOT NULL DEFAULT '', ua TEXT NOT NULL DEFAULT '')")
             self._exec(f"CREATE TABLE IF NOT EXISTS {BLOBS} (kind TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL, "
                        "updated_at TEXT NOT NULL, PRIMARY KEY (kind, name))")
+
+        self._add_audit_columns()
+
+    def _add_audit_columns(self):
+        """Bang nhat ky tao tu ban cu (chua co cot ip / ua) -> them cot."""
+        if self.kind == "mysql":
+            have = {r[0].lower() for r in self._exec(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() "
+                f"AND TABLE_NAME = '{AUDIT}'", fetch=True)}
+            for col, ddl in (("ip", "VARCHAR(64) NOT NULL DEFAULT ''"), ("ua", "VARCHAR(80) NOT NULL DEFAULT ''")):
+                if col not in have:
+                    self._exec(f"ALTER TABLE {AUDIT} ADD COLUMN {col} {ddl}")
+        else:
+            have = {r[1].lower() for r in self._exec(f"PRAGMA table_info({AUDIT})", fetch=True)}
+            for col in ("ip", "ua"):
+                if col not in have:
+                    self._exec(f"ALTER TABLE {AUDIT} ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
     # ------------------------------------------------------------ tai lieu
     def versions(self):
@@ -196,14 +215,16 @@ class DocDB:
     # ------------------------------------------------------------ nhat ky
     def audit_add(self, rec):
         p = self.ph
-        self._exec(f"INSERT INTO {AUDIT} (ts, user, action, site, detail) VALUES ({p}, {p}, {p}, {p}, {p})",
+        self._exec(f"INSERT INTO {AUDIT} (ts, user, action, site, detail, ip, ua) "
+                   f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p})",
                    (rec["ts"], rec.get("user", "")[:64], rec.get("action", "")[:64], rec.get("site", "")[:64],
-                    str(rec.get("detail", ""))))
+                    str(rec.get("detail", "")), str(rec.get("ip") or "")[:64], str(rec.get("ua") or "")[:80]))
 
     def audit_read(self, limit=500):
-        rows = self._exec(f"SELECT ts, user, action, site, detail FROM {AUDIT} ORDER BY id DESC LIMIT {int(limit)}",
-                          fetch=True)
-        return [{"ts": r[0], "user": r[1], "action": r[2], "site": r[3], "detail": r[4] or ""} for r in rows]
+        rows = self._exec(f"SELECT ts, user, action, site, detail, ip, ua FROM {AUDIT} ORDER BY id DESC "
+                          f"LIMIT {int(limit)}", fetch=True)
+        return [{"ts": r[0], "user": r[1], "action": r[2], "site": r[3], "detail": r[4] or "", "ip": r[5] or "",
+                 "ua": r[6] or ""} for r in rows]
 
     def audit_count(self):
         return int(self._exec(f"SELECT COUNT(*) FROM {AUDIT}", fetch=True)[0][0])
