@@ -222,6 +222,21 @@ const PAGES = {
   templates: { title: "Mẫu BMC", sub: "" },
 };
 
+const SITE_ICO = {
+  play: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
+  retry: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
+  list: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/></svg>',
+  check: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  pulse: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+  import: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
+  clock: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  server: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><line x1="7" y1="6.5" x2="7.01" y2="6.5"/><line x1="7" y1="17.5" x2="7.01" y2="17.5"/></svg>',
+  terminal: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-5-6-5"/><path d="M12 19h8"/></svg>',
+  edit: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  key: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3"/><path d="m16 7 3 3"/><path d="m19 4 2 2"/></svg>',
+  trash: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>',
+};
+
 const ICO_ACTIONS = {
   refresh: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
   export: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>',
@@ -444,11 +459,18 @@ function renderSites() {
   grid.innerHTML = state.sites.map((s) => {
     const rep = s.last_report || {};
     const edit = canEdit(s.key);
+    const k = esc(s.key);
     const warns = (s.warnings || []).slice(0, 3).map((w) =>
       `<div><span class="sev ${w.level}"></span><span>${esc(w.text)}</span></div>`).join("");
     return `<article class="site-card ${s.online || !s.token_set ? "" : "offline"}">
       <header>${siteDot(s)}<div class="grow"><h3>${esc(s.label)} <span class="cell-sub mono">${esc(s.key)}</span></h3>
-        <p class="sub mono">${esc(s.domain)}</p></div>${phaseTag(s)}</header>
+        <p class="sub mono">${esc(s.domain)}</p></div>
+        <div class="hd-right">${phaseTag(s)}
+          ${isAdmin() ? `<span class="sa-admin">
+            <button class="btn icon-btn ghost" data-site-act="edit" data-site="${k}" title="Sửa site" aria-label="Sửa site">${SITE_ICO.edit}</button>
+            <button class="btn icon-btn ghost" data-site-act="token" data-site="${k}" title="Token agent" aria-label="Token agent">${SITE_ICO.key}</button>
+            <button class="btn icon-btn danger-ghost" data-site-act="delete" data-site="${k}" title="Xoá site" aria-label="Xoá site">${SITE_ICO.trash}</button>
+          </span>` : ""}</div></header>
       <div class="stats">
         <div><b>${s.enabled}</b><span>BMC</span></div>
         <div class="${s.down ? "bad" : ""}"><b>${s.down}</b><span>mất kết nối</span></div>
@@ -471,20 +493,21 @@ function renderSites() {
         ${Object.keys(s.overrides || {}).length ? `<div class="row"><span>Ghi đè</span><span>${Object.keys(s.overrides).map((k) => `<span class="tag">${esc(k)}</span>`).join("")}</span></div>` : ""}
         ${warns ? `<div class="warns">${warns}</div>` : ""}
       </div>
-      <footer>
-        ${edit && ["pending", "failed"].includes(s.phase) ? `<button class="btn small primary" data-site-act="apply" data-site="${esc(s.key)}">Áp dụng</button>` : ""}
-        ${edit && s.phase === "failed" ? `<button class="btn small" data-site-act="retry" data-site="${esc(s.key)}">Thử lại</button>` : ""}
-        <a class="btn small ghost" href="#bmcs" data-goto-site="${esc(s.key)}">BMC</a>
-        ${edit ? `<button class="btn small ghost" data-site-act="import" data-site="${esc(s.key)}">Nhập từ nginx</button>` : ""}
-        ${edit ? `<button class="btn small ghost" data-site-act="recheck" data-site="${esc(s.key)}">Kiểm tra</button>` : ""}
-        ${edit && s.online ? `<button class="btn small ghost" data-site-act="diagnose" data-site="${esc(s.key)}" title="Ping / thử cổng / thử TLS mọi BMC từ server site">Kiểm tra BMC</button>` : ""}
-        <button class="btn small ghost" data-site-act="history" data-site="${esc(s.key)}">Lịch sử${s.history_count ? ` (${s.history_count})` : ""}</button>
-        ${isAdmin() && s.online ? `<button class="btn small ghost" data-site-act="server" data-site="${esc(s.key)}" title="Log agent / Traefik, restart từ xa">Server</button>` : ""}
-        ${isAdmin() && !s.online ? `<button class="btn small" data-site-act="install" data-site="${esc(s.key)}">Cài agent</button>` : ""}
-        ${isAdmin() ? `<span class="grow"></span>
-          <button class="btn small ghost" data-site-act="edit" data-site="${esc(s.key)}">Sửa</button>
-          <button class="btn small ghost" data-site-act="token" data-site="${esc(s.key)}">Token</button>
-          <button class="btn small danger-ghost" data-site-act="delete" data-site="${esc(s.key)}">Xoá</button>` : ""}
+      <footer class="site-actions">
+        <div class="sa-main">
+          ${edit && ["pending", "failed"].includes(s.phase) ? `<button class="btn primary" data-site-act="apply" data-site="${k}">${SITE_ICO.play}Áp dụng</button>` : ""}
+          ${edit && s.phase === "failed" ? `<button class="btn" data-site-act="retry" data-site="${k}">${SITE_ICO.retry}Thử lại</button>` : ""}
+          ${isAdmin() && !s.online ? `<button class="btn primary-soft" data-site-act="install" data-site="${k}">${SITE_ICO.terminal}Cài agent</button>` : ""}
+          <a class="btn" href="#bmcs" data-goto-site="${k}">${SITE_ICO.list}Xem BMC</a>
+
+        </div>
+        <div class="sa-tools">
+          ${edit ? `<button class="btn" data-site-act="recheck" data-site="${k}" title="Hỏi lại trạng thái agent / Traefik">${SITE_ICO.check}Kiểm tra</button>` : ""}
+          ${edit && s.online ? `<button class="btn" data-site-act="diagnose" data-site="${k}" title="Ping / thử cổng / thử TLS mọi BMC từ server site">${SITE_ICO.pulse}Kiểm tra BMC</button>` : ""}
+          ${edit ? `<button class="btn" data-site-act="import" data-site="${k}" title="Đọc config nginx cũ trên server">${SITE_ICO.import}Nhập nginx</button>` : ""}
+          <button class="btn" data-site-act="history" data-site="${k}">${SITE_ICO.clock}Lịch sử${s.history_count ? `<span class="count">${s.history_count}</span>` : ""}</button>
+          ${isAdmin() && s.online ? `<button class="btn" data-site-act="server" data-site="${k}" title="Log agent / Traefik, restart từ xa">${SITE_ICO.server}Server</button>` : ""}
+        </div>
       </footer></article>`;
   }).join("");
 }
