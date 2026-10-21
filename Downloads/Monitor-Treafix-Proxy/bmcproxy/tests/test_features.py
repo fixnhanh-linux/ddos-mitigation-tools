@@ -278,6 +278,16 @@ class SiteTest(unittest.TestCase):
         self.assertEqual(req(self.port, "DELETE", f"/api/maint/{m['id']}", None, self.ck)[0], 200)
         self.assertEqual(self.sync()[2]["maint"], [])
 
+    def test_stats(self):
+        self.sync({"access": [{"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "port": 8001, "ip": "9.9.9.9", "user": "noc@x",
+                               "kind": "console", "path": "/__kvm/"}]})
+        s, _, r = req(self.port, "GET", "/api/stats", None, self.ck)
+        self.assertEqual(s, 200)
+        self.assertEqual(len(r["days"]), 7)
+        self.assertGreaterEqual(r["days"][-1]["console"], 1)
+        self.assertTrue(any(u["user"] == "noc@x" for u in r["top_users"]))
+        self.assertTrue(any(b["port"] == 8001 and b["note"] == "KH 1" for b in r["top_bmcs"]))
+
     def test_render_guest_router(self):
         from gw_render import expected_routers, render_bmc
         from gw_common import BMC_DEFAULTS

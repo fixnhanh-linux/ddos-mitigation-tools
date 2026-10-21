@@ -738,6 +738,48 @@ class App:
     def visible_sites(self, u):
         return [k for k in sorted(self.store.sites) if self.can_view(u, k)]
 
+    # ------------------------------------------------------------ thong ke Tong quan
+    def stats(self, u, days=7):
+        st = self.store
+        today = dt.date.today()
+        dates = [(today - dt.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+        by_day = {d: {"date": d, "web": 0, "console": 0, "guest": 0} for d in dates}
+        bmc_n, user_n = {}, {}
+        for r in st.read_access(8000):
+            d = str(r.get("ts", ""))[:10]
+            if d < dates[0]:
+                continue
+            if d not in by_day or not self.can_view(u, r.get("site", "")):
+                continue
+            guest = r.get("kind") == "guest-open" or str(r.get("user", "")).startswith("khách")
+            if r.get("kind") == "guest-open":
+                continue  # lan mo link: da dem o lan vao trang ngay sau
+            by_day[d]["guest" if guest else "console" if r.get("kind") == "console" else "web"] += 1
+            k = (r.get("site"), r.get("port"))
+            b = bmc_n.setdefault(k, {"site": k[0], "port": k[1], "count": 0, "last": ""})
+            b["count"] += 1
+            b["last"] = max(b["last"], str(r.get("ts", "")))
+            if not guest:
+                who = str(r.get("user", "")) or "(không rõ)"
+                x = user_n.setdefault(who, {"user": who, "count": 0, "last": "", "ips": set()})
+                x["count"] += 1
+                x["last"] = max(x["last"], str(r.get("ts", "")))
+                x["ips"].add(r.get("ip", ""))
+        notes = {(b["site"], b["port"]): b.get("note", "") for b in st.bmcs}
+        top_bmcs = sorted(bmc_n.values(), key=lambda x: (-x["count"], x["port"]))[:6]
+        for b in top_bmcs:
+            b["note"] = notes.get((b["site"], b["port"]), "")
+        top_users = [{**x, "ips": len(x["ips"])} for x in sorted(user_n.values(), key=lambda x: -x["count"])[:6]]
+        now = time.time()
+        guests = [self.guest_view(i, g) for i, g in st.guests.items()
+                  if self.can_view(u, g["site"]) and not g.get("revoked") and g["exp"] > now]
+        maint = [self.maint_view(i, m) for i, m in st.maint.items() if self.can_view(u, m["site"])]
+        maint = sorted((m for m in maint if m["status"] != "done"), key=lambda m: (m["status"] != "active", m["start"]))[:5]
+        days_list = [by_day[d] for d in dates]
+        return {"days": days_list, "total": sum(x["web"] + x["console"] + x["guest"] for x in days_list),
+                "users": len(user_n), "top_bmcs": top_bmcs, "top_users": top_users,
+                "guests": sorted(guests, key=lambda g: g["expires"])[:5], "guests_active": len(guests), "maint": maint}
+
     # ------------------------------------------------------------ cong khach hang
     def customer_bmcs(self, u):
         """BMC thuoc tai khoan khach hang: theo nhan (KH-...) hoac danh sach site:cong."""
@@ -1782,6 +1824,10 @@ def make_handler(app):
                 return self.api_ldap(method, a1, u)
             if res == "guests":
                 return self.api_guests(method, a1, u)
+            if res == "stats" and method == "GET":
+                if u["role"] == "viewer":
+                    raise PermissionError("Không có quyền xem thống kê truy cập")
+                return self.send(200, app.stats(u))
             if res == "access" and method == "GET":
                 if u["role"] == "viewer":
                     raise PermissionError("Không có quyền xem lịch sử truy cập")

@@ -303,6 +303,7 @@ function route() {
   if (page === "audit") loadAudit();
   if (page === "access") loadAccess();
   if (page === "my") loadMy();
+  if (page === "overview") loadStats().catch(() => { });
   if (page === "users") loadUsers();
   if (page === "settings") renderSettings();
 }
@@ -432,9 +433,69 @@ function phaseTag(s) {
   return `<span class="tag ${cls}">${txt}</span>`;
 }
 
+// ------------------------------------------------------------------ Thống kê truy cập (Tổng quan)
+let statsAt = 0;
+async function loadStats(force = false) {
+  if (!state.me || state.me.role === "viewer" || isCustomer()) return;
+  if (!force && Date.now() - statsAt < 60000) return;  // doc nhat ky truy cap: toi da 1 lan / phut
+  statsAt = Date.now();
+  const s = await api("GET", "stats");
+  $("#ov-stats").classList.remove("hidden");
+  $("#ov-total").textContent = `${fmtNum(s.total)} lượt · ${s.users} người`;
+  const max = Math.max(1, ...s.days.map((d) => d.web + d.console + d.guest));
+  const DOW = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+  const label = (iso) => { const d = new Date(iso + "T00:00:00"); return `${DOW[d.getDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}`; };
+  // 1 chuoi (tong luot / ngay): cot 1 mau, khong chu thich; rê chuột xem chi tiết từng loại
+  $("#ov-chart").setAttribute("aria-label", "Lượt mở BMC 7 ngày: " + s.days.map((d) => `${label(d.date)} ${d.web + d.console + d.guest}`).join(", "));
+  $("#ov-chart").innerHTML = `<div class="bars">${s.days.map((d) => {
+    const n = d.web + d.console + d.guest;
+    return `<div class="bar-col" tabindex="0" data-tip="${esc(`${label(d.date)}: ${n} lượt · trang BMC ${d.web} · console ${d.console} · khách ${d.guest}`)}">
+      <span class="bar-val">${n || ""}</span><span class="bar" style="height:${n ? Math.max(3, Math.round((n / max) * 100)) : 0}%"></span></div>`;
+  }).join("")}</div><div class="bar-axis">${s.days.map((d) => `<span>${label(d.date)}</span>`).join("")}</div>`;
+  $("#ov-days").innerHTML = s.days.slice().reverse().map((d) => `<tr><td>${label(d.date)}</td><td>${d.web}</td><td>${d.console}</td>
+    <td>${d.guest}</td><td><b>${d.web + d.console + d.guest}</b></td></tr>`).join("");
+  const top = Math.max(1, ...s.top_bmcs.map((b) => b.count));
+  $("#ov-top-bmcs").innerHTML = s.top_bmcs.map((b) => `<div class="list-item rank-item">
+      <b class="port">${b.port}</b>
+      <span class="grow"><span class="rank-txt" title="${esc((b.note || "") + " · " + siteLabel(b.site))}">${esc(b.note || "—")} <span class="cell-sub">· ${esc(siteLabel(b.site))}</span></span>
+        <span class="rank-bar"><i style="width:${Math.round((b.count / top) * 100)}%"></i></span></span>
+      <b class="num">${fmtNum(b.count)}</b></div>`).join("") || '<div class="list-empty">Chưa có lượt truy cập (agent cần bản mới).</div>';
+  $("#ov-top-users").innerHTML = s.top_users.map((x) => `<div class="list-item">
+      <span class="grow" title="${esc(x.user)}">${esc(x.user)}</span><span class="cell-sub">${x.ips} IP · ${esc(fmtTs(x.last).slice(5, 16))}</span>
+      <b class="num">${fmtNum(x.count)}</b></div>`).join("") || '<div class="list-empty">Chưa có.</div>';
+  const gm = [
+    ...s.maint.map((m) => `<div class="list-item"><span class="sev ${m.status === "active" ? "warn" : "info"}"></span>
+      <span class="tag">${esc(siteLabel(m.site))}</span><span class="grow">🔧 ${m.port ? `BMC ${m.port}` : "cả site"} · ${esc(m.note || "bảo trì")}</span>
+      <span class="cell-sub mono">${m.status === "active" ? "đến " : ""}${esc(hhmm(m.status === "active" ? m.end : m.start))}</span></div>`),
+    ...s.guests.map((g) => `<div class="list-item"><span class="sev ok"></span><span class="tag">${esc(siteLabel(g.site))}</span>
+      <span class="grow">Link khách BMC ${g.port}${g.label ? " · " + esc(g.label) : ""}</span>
+      <span class="cell-sub">còn ${g.left_minutes >= 120 ? Math.round(g.left_minutes / 60) + " giờ" : g.left_minutes + " phút"}</span></div>`),
+  ];
+  $("#ov-guest-maint").innerHTML = gm.join("") || '<div class="list-empty">Không có link khách đang mở hay lịch bảo trì.</div>';
+}
+// tooltip cho cot bieu do (chuot + ban phim)
+(() => {
+  const tip = document.createElement("div");
+  tip.className = "chart-tip hidden";
+  document.body.appendChild(tip);
+  const show = (el) => {
+    const r = el.getBoundingClientRect();
+    tip.textContent = el.dataset.tip;
+    tip.classList.remove("hidden");
+    const w = tip.offsetWidth;
+    tip.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+    tip.style.top = `${r.top + window.scrollY - tip.offsetHeight - 8}px`;
+  };
+  document.addEventListener("mouseover", (e) => { const el = e.target.closest(".bar-col"); if (el) show(el); });
+  document.addEventListener("mouseout", (e) => { if (e.target.closest(".bar-col")) tip.classList.add("hidden"); });
+  document.addEventListener("focusin", (e) => { const el = e.target.closest(".bar-col"); if (el) show(el); });
+  document.addEventListener("focusout", () => tip.classList.add("hidden"));
+})();
+
 function renderOverview() {
   const o = state.overview;
   if (!o) return;
+  if (state.page === "overview") loadStats().catch(() => { });
   const online = o.sites.filter((s) => s.online).length;
   const authTotal = o.auth.ok + o.auth.deny + o.auth.error;
   const kpis = [

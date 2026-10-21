@@ -111,7 +111,7 @@
       <div class="my-grid" id="my-grid"></div>
       <div class="panel mt">
         <div class="panel-head"><h2>Lịch sử truy cập</h2><span class="hint">Ai mở BMC của bạn, lúc nào, từ IP nào</span></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>Thời điểm</th><th>BMC</th><th>Người / link</th><th>IP</th><th>Loại</th></tr></thead>
+        <div class="table-wrap"><table class="table stack"><thead><tr><th>Thời điểm</th><th>BMC</th><th>Người / link</th><th>IP</th><th>Loại</th></tr></thead>
           <tbody id="my-access"></tbody></table></div>
       </div>
     </section>
@@ -119,6 +119,26 @@
     <section class="page" id="page-overview">
       <div class="kpis" id="kpis"></div>
       <div class="site-strip" id="ov-sites"></div>
+      <div class="stats-block hidden" id="ov-stats">
+        <div class="panel ov-chart-panel">
+          <div class="panel-head"><h2>Lượt mở BMC 7 ngày</h2><span class="hint" id="ov-total"></span></div>
+          <div id="ov-chart" class="bar-chart" role="img"></div>
+          <details class="mt"><summary class="hint">Xem bảng số liệu</summary><div class="table-wrap"><table class="table"><thead>
+            <tr><th>Ngày</th><th>Trang BMC</th><th>Console</th><th>Khách</th><th>Tổng</th></tr></thead><tbody id="ov-days"></tbody></table></div></details>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>BMC mở nhiều nhất</h2><a href="#access" class="link">Truy cập BMC</a></div>
+          <div id="ov-top-bmcs" class="list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Người dùng hoạt động</h2><span class="hint">7 ngày</span></div>
+          <div id="ov-top-users" class="list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Link khách · bảo trì</h2></div>
+          <div id="ov-guest-maint" class="list"></div>
+        </div>
+      </div>
       <div class="grid-2">
         <div class="panel">
           <div class="panel-head"><h2>Cảnh báo</h2><span class="hint" id="ov-warn-count"></span></div>
@@ -213,7 +233,7 @@
     <section class="page hidden" id="page-access">
       <div class="panel" id="guest-panel">
         <div class="panel-head"><h2>Link tạm cho khách</h2><span class="hint">Tạo ở trang BMC → bấm vào BMC → <b>Link khách</b></span></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>BMC</th><th>Ghi chú link</th><th>Hết hạn</th><th>Người tạo</th><th>Trạng thái</th><th></th></tr></thead>
+        <div class="table-wrap"><table class="table stack"><thead><tr><th>BMC</th><th>Ghi chú link</th><th>Hết hạn</th><th>Người tạo</th><th>Trạng thái</th><th></th></tr></thead>
           <tbody id="guest-list"></tbody></table></div>
       </div>
       <div class="toolbar audit-tools mt">
@@ -225,7 +245,7 @@
         <button class="btn" id="btn-access-csv" type="button">Xuất CSV</button>
       </div>
       <div class="panel flush"><div class="table-wrap">
-        <table class="table"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>IP</th><th>Site</th><th>BMC</th><th>Loại</th></tr></thead>
+        <table class="table stack"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>IP</th><th>Site</th><th>BMC</th><th>Loại</th></tr></thead>
           <tbody id="access-list"></tbody></table>
       </div></div>
       <p class="hint mt">Mỗi người (hoặc khách) mở cùng 1 BMC từ cùng 1 IP trong 30 phút chỉ ghi 1 dòng. Agent gửi về web mỗi 10 giây.</p>
@@ -245,7 +265,7 @@
         <button class="btn" id="btn-audit-csv" type="button">Xuất CSV</button>
       </div>
       <div class="panel flush"><div class="table-wrap">
-        <table class="table"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>IP · trình duyệt</th><th>Site</th><th>Thao tác</th><th>Chi tiết</th></tr></thead>
+        <table class="table stack"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>IP · trình duyệt</th><th>Site</th><th>Thao tác</th><th>Chi tiết</th></tr></thead>
           <tbody id="audit-list"></tbody></table>
       </div></div>
     </section>
