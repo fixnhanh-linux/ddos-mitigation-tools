@@ -1025,5 +1025,18 @@ Nhập **Thử đăng nhập** (tài khoản + mật khẩu AD của bạn) → 
 - Trên web vẫn **khoá / đặt hạn / bật 2FA / đăng xuất** được tài khoản AD. Mật khẩu AD **không lưu** trên web, đổi mật khẩu thì đổi trên Windows.
 - Trùng tên với tài khoản riêng của web (vd `admin`): luôn dùng mật khẩu riêng của web, AD không "chiếm" được tài khoản đó.
 - AD báo mật khẩu hết hạn / tài khoản bị khoá → web báo rõ lý do. DC không trả lời → báo lỗi, dùng tài khoản riêng của web.
-- Nghỉ việc: tắt tài khoản trong AD là không đăng nhập mới được nữa. Phiên đang mở (tối đa 12 giờ, hoặc 30 ngày nếu tick Ghi nhớ) thì bấm **Người dùng → Đăng xuất** hoặc **Khoá**.
+- Nghỉ việc / rút khỏi nhóm: tắt tài khoản trong AD là không đăng nhập mới được nữa. Có **tài khoản dịch vụ** thì web tự hỏi lại AD **mỗi 1 giờ**: tài khoản bị tắt, bị xoá hoặc không còn thuộc nhóm nào thì web **tự đăng xuất mọi phiên**; nhóm đổi thì vai trò đổi theo. Không có tài khoản dịch vụ thì bấm **Người dùng → Đăng xuất** hoặc **Khoá**.
 - Cấu hình AD lưu ở `data/auth.json` (chmod 600, hoặc MySQL nếu bật), mật khẩu tài khoản dịch vụ không bao giờ gửi về trình duyệt.
+
+## 27. Bảo vệ đăng nhập, nhật ký, MySQL
+
+| Việc | Cách web làm |
+|---|---|
+| Sai mật khẩu | Mỗi IP sai 5 lần → chặn IP 5 phút. Mỗi **tài khoản** sai 10 lần (từ bất kỳ IP nào) → **khoá tài khoản 15 phút**, ghi vào lịch sử đăng nhập |
+| Đổi mật khẩu | Mọi phiên khác của tài khoản (kể cả "Ghi nhớ 30 ngày" ở máy khác) bị **đăng xuất ngay**, phiên đang dùng giữ lại |
+| Nhật ký `data/audit.log` | Quá 20 MB tự chuyển sang `audit.log.1` … `audit.log.5` (file cũ nhất bị xoá). Trang Nhật ký chỉ đọc phần cuối file nên không chậm dần |
+| HTTPS | Web gửi header HSTS: trình duyệt nhớ 1 năm, luôn dùng https cho địa chỉ web |
+| MySQL | `install.sh db` **ưu tiên kết nối mã hoá TLS** (MySQL 8 có sẵn). MySQL không hỗ trợ thì dùng không mã hoá và web hiện cảnh báo trên trang Tổng quan |
+
+Bật TLS cho web đang dùng MySQL không mã hoá: chạy lại `sudo bash install.sh db` (nhập lại thông tin, dữ liệu giữ nguyên).
+Muốn kiểm tra cả chứng chỉ MySQL: `sudo DB_SSL_CA=/etc/bmcproxy/mysql-ca.pem bash install.sh db`.

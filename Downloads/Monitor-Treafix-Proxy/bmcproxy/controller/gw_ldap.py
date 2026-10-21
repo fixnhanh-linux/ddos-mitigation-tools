@@ -329,13 +329,63 @@ def test_connection(cfg, server=None, strategy=None):
     return "Kết nối được máy chủ (chưa thử đăng nhập - nhập tài khoản thử bên dưới)"
 
 
+def lookup(cfg, raw_user, server=None, strategy=None):
+    """Kiem tra lai tai khoan (khong can mat khau user, can tai khoan dich vu).
+    -> info nhu authenticate (khong co mat khau) | None neu khong con / bi tat. Loi ket noi -> LdapError."""
+    cfg = {**LDAP_DEFAULTS, **(cfg or {})}
+    name = normalize_user(raw_user)
+    if not (name and cfg["bind_dn"] and available()):
+        raise LdapError("Cần tài khoản dịch vụ để kiểm tra lại", "config")
+    mode = cfg["mode"]
+    server = server or _servers(cfg)
+    base = cfg["base_dn"] or domain_base(cfg["domain"])
+    flt = (cfg["user_filter"] or DEFAULT_FILTER[mode]).replace("{user}", escape_filter_chars(name))
+    attrs = ["displayName", "cn", "mail", "memberOf"] + (["userAccountControl"] if mode == "ad" else [])
+    try:
+        svc = _bind(server, cfg, cfg["bind_dn"], cfg["bind_password"], strategy)
+    except LdapError as e:
+        raise LdapError(str(e), "down" if e.kind == "down" else "config")
+    try:
+        svc.search(base, flt, attributes=attrs, size_limit=2)
+        found = [e for e in svc.response or [] if e.get("type") == "searchResEntry"]
+        if len(found) != 1:
+            return None
+        entry = found[0]
+        try:
+            if mode == "ad" and int(_first(entry, "userAccountControl") or 0) & 2:  # ACCOUNTDISABLE
+                return None
+        except ValueError:
+            pass
+        dn = entry["dn"]
+        groups = list(entry.get("attributes", {}).get("memberOf") or [])
+        if mode == "ad" and cfg["nested"]:
+            svc.search(base, f"(&(objectClass=group)(member:{AD_NESTED_OID}:={escape_filter_chars(dn)}))",
+                       attributes=["cn"], size_limit=1000)
+            groups += [e["dn"] for e in svc.response or [] if e.get("type") == "searchResEntry"]
+        elif mode == "ldap":
+            svc.search(base, "(|(member={0})(uniqueMember={0})(memberUid={1}))".format(
+                escape_filter_chars(dn), escape_filter_chars(name)), attributes=["cn"], size_limit=1000)
+            groups += [e["dn"] for e in svc.response or [] if e.get("type") == "searchResEntry"]
+    finally:
+        svc.unbind()
+    groups = sorted(set(groups), key=str.lower)
+    role = next((r for r in ROLES_ORDER if _group_hit(split_groups(cfg[f"group_{r}"]), groups)), "")
+    sites = []
+    for g, ss in parse_site_groups(cfg["site_groups"]):
+        if _group_hit([g], groups):
+            sites += [s for s in ss if s not in sites]
+    return {"name": name, "dn": dn, "groups": groups, "role": role, "matched": bool(role), "sites": sites,
+            "full_name": _first(entry, "displayName") or _first(entry, "cn"), "email": _first(entry, "mail")}
+
+
 def decide(cfg, info, rec):
     """Vai tro / site sau khi AD xac thuc dung.
-    Thuoc nhom da khai bao -> theo nhom. Khong thuoc nhom nao: tai khoan da duoc quan tri tao truoc -> giu
-    vai tro tren web; con khong -> vai tro mac dinh; khong co vai tro mac dinh -> tu choi."""
+    Thuoc nhom da khai bao -> theo nhom. Khong thuoc nhom nao: tai khoan QUAN TRI tao san tren web -> giu
+    vai tro tren web; con lai (ke ca tai khoan web tu tao luc dang nhap AD truoc day) -> vai tro mac dinh;
+    khong co vai tro mac dinh -> tu choi (bi rut khoi nhom AD la mat quyen)."""
     if info["matched"]:
         role, sites = info["role"], info["sites"]
-    elif rec:
+    elif rec and rec.get("created_by") and rec.get("created_by") != "AD":
         role, sites = rec.get("role", "viewer"), rec.get("sites") or []
     elif cfg.get("default_role"):
         role, sites = cfg["default_role"], info["sites"]

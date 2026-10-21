@@ -110,6 +110,69 @@ class WebTest(unittest.TestCase):
     def test_3_login_info(self):
         self.assertEqual(self.req("GET", "/api/login-info", cookie="")[2], {"ldap": False, "domain": ""})
 
+    def test_4_password_change_drops_other_sessions(self):
+        from gw_common import hash_password
+        pw = "U-" + secrets.token_hex(8)
+        with self.st.lock:
+            self.st.users["u1"] = {**hash_password(pw), "role": "viewer", "sites": []}
+            self.st.save("users.json")
+        a = self.req("POST", "/api/login", {"user": "u1", "password": pw}, cookie="")[1]
+        b = self.req("POST", "/api/login", {"user": "u1", "password": pw, "remember": True}, cookie="")[1]
+        new = "N-" + secrets.token_hex(8)
+        s, _, d = self.req("POST", "/api/password", {"old": pw, "new": new}, cookie=a)
+        self.assertEqual((s, d.get("dropped")), (200, 1))
+        self.assertEqual(self.req("GET", "/api/me", cookie=a)[0], 200)   # phien dang doi van dung
+        self.assertEqual(self.req("GET", "/api/me", cookie=b)[0], 401)   # phien khac bi dang xuat
+
+    def test_5_account_lockout(self):
+        from gw_common import hash_password
+        import gw_controller
+        pw = "L-" + secrets.token_hex(8)
+        with self.st.lock:
+            self.st.users["u2"] = {**hash_password(pw), "role": "viewer", "sites": []}
+            self.st.save("users.json")
+        app = None
+        for _ in range(gw_controller.ACCOUNT_MAX_FAILS):
+            s = self.req("POST", "/api/login", {"user": "u2", "password": "sai"}, cookie="")[0]
+            self.assertIn(s, (401, 429))
+            # moi lan sai doi IP gia: xoa khoa theo IP de chi con khoa theo tai khoan
+            import gc
+            app = app or next(o for o in gc.get_objects() if isinstance(o, gw_controller.App))
+            app.fails.clear()
+        s, _, d = self.req("POST", "/api/login", {"user": "u2", "password": pw}, cookie="")
+        self.assertEqual(s, 429, d)                       # dung mat khau van bi khoa
+        app.acct_fails.clear()
+        app.fails.clear()
+        self.assertEqual(self.req("POST", "/api/login", {"user": "u2", "password": pw}, cookie="")[0], 200)
+
+
+class AuditRotateTest(unittest.TestCase):
+    def test_rotate_and_tail(self):
+        import gw_controller
+        from gw_controller import Store, load_controller_config, tail_lines
+        tmp = tempfile.mkdtemp(prefix="bmcproxy-audit-")
+        try:
+            cfgp = os.path.join(tmp, "config.json")
+            with open(cfgp, "w") as f:
+                json.dump({"data_dir": os.path.join(tmp, "data"), "backup_dir": os.path.join(tmp, "bk")}, f)
+            st = Store(load_controller_config(cfgp))
+            old = gw_controller.AUDIT_MAX_BYTES
+            gw_controller.AUDIT_MAX_BYTES = 4000
+            try:
+                for i in range(200):
+                    st.audit("t", "x", f"dong {i}")
+            finally:
+                gw_controller.AUDIT_MAX_BYTES = old
+            d = os.path.join(tmp, "data")
+            self.assertTrue(os.path.exists(os.path.join(d, "audit.log.1")))
+            self.assertFalse(os.path.exists(os.path.join(d, f"audit.log.{gw_controller.AUDIT_KEEP + 1}")))
+            rows = st.read_audit(30)
+            self.assertEqual(rows[0]["detail"], "dong 199")
+            self.assertEqual(len(rows), 30)
+            self.assertEqual(len(tail_lines(os.path.join(d, "audit.log"), 3)), 3)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 class LdapMockTest(unittest.TestCase):
     def setUp(self):
@@ -150,10 +213,50 @@ class LdapMockTest(unittest.TestCase):
             self.auth("khai", "Pw#1", bind_password="sai")
         self.assertEqual(e.exception.kind, "config")
 
+    def test_lookup_and_revoke(self):
+        info = self.L.lookup(self.cfg, "nv", server=self.srv, strategy=self.ldap3.MOCK_SYNC)
+        self.assertEqual(info["role"], "operator")
+        self.assertIsNone(self.L.lookup(self.cfg, "khongco", server=self.srv, strategy=self.ldap3.MOCK_SYNC))
+        # tai khoan web tu tao luc dang nhap AD, nay khong con thuoc nhom nao -> mat quyen
+        with self.assertRaises(self.L.LdapError):
+            self.L.decide(self.cfg, {"matched": False, "sites": []}, {"role": "admin", "created_by": "AD"})
+
+    def test_recheck_logs_out_removed_user(self):
+        import time
+        import gw_controller
+        from gw_controller import App, Store, load_controller_config
+        tmp = tempfile.mkdtemp(prefix="bmcproxy-ad-")
+        old_servers, old_sync = self.L._servers, self.ldap3.SYNC
+        try:
+            cfgp = os.path.join(tmp, "config.json")
+            with open(cfgp, "w") as f:
+                json.dump({"data_dir": os.path.join(tmp, "data"), "backup_dir": os.path.join(tmp, "bk")}, f)
+            st = Store(load_controller_config(cfgp))
+            st.auth["ldap"] = self.cfg
+            st.users["ghost"] = {"source": "ldap", "role": "admin", "sites": [], "created_by": "AD"}  # da bi xoa tren AD
+            st.users["nv"] = {"source": "ldap", "role": "viewer", "sites": [], "created_by": "AD"}    # nhom da doi
+            app = App(st)
+            self.L._servers = lambda cfg: self.srv
+            self.ldap3.SYNC = self.ldap3.MOCK_SYNC
+            tg, tn = app.new_session("ghost"), app.new_session("nv")
+            self.assertEqual(app.session_user(tg), "ghost")   # lan dau: chay kiem tra nen
+            app.session_user(tn)
+            for _ in range(50):
+                if not app.user_sessions("ghost") and st.users["nv"]["role"] == "operator":
+                    break
+                time.sleep(0.1)
+            self.assertIsNone(app.session_user(tg))
+            self.assertEqual(app.session_user(tn), "nv")
+            self.assertEqual((st.users["nv"]["role"], st.users["nv"]["sites"]), ("operator", []))  # site hcm chua tao
+        finally:
+            self.L._servers, self.ldap3.SYNC = old_servers, old_sync
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_decide(self):
         with self.assertRaises(self.L.LdapError):
             self.L.decide(self.cfg, {"matched": False, "sites": []}, None)
-        self.assertEqual(self.L.decide(self.cfg, {"matched": False, "sites": []}, {"role": "viewer", "sites": []}),
+        self.assertEqual(self.L.decide(self.cfg, {"matched": False, "sites": []},
+                                       {"role": "viewer", "sites": [], "created_by": "admin"}),
                          ("viewer", []))
 
 

@@ -2,7 +2,9 @@
 
 config.json:
     "db": {"type": "mysql", "host": "103.48.194.52", "port": 3306, "user": "bmcproxy",
-           "password_file": "/etc/bmcproxy/db.pass", "database": "bmcproxy", "ssl": false}
+           "password_file": "/etc/bmcproxy/db.pass", "database": "bmcproxy",
+           "ssl": true, "ssl_verify": false, "ssl_ca": ""}
+    ssl true = ma hoa ket noi (MySQL 8 co san TLS). ssl_verify + ssl_ca = kiem tra chung chi MySQL (CA rieng).
 
 Moi "file" cu (bmc.json, sites.json, users.json...) la 1 dong trong bang bmcproxy_docs (JSON + so phien ban),
 nhat ky nam o bang bmcproxy_audit. "type": "sqlite" (+ "path") dung de thu nghiem khong can MySQL.

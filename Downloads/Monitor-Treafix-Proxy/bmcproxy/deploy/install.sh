@@ -520,12 +520,27 @@ install_db() {
   unset pw
   ok "mật khẩu lưu ở /etc/bmcproxy/db.pass (chmod 600, không nằm trong config.json)"
   say "Thử kết nối MySQL $u@$h:$p/$d"
-  sudo -u bmcproxy python3 - "$h" "$p" "$u" "$d" <<'PY' || die "Không kết nối được MySQL (xem lỗi ở trên). config.json chưa bị đổi."
-import sys, pymysql
+  # Uu tien ket noi ma hoa TLS (MySQL 8 co san). DB_SSL_CA=/duong/dan/ca.pem de kiem tra chung chi MySQL.
+  rm -f /tmp/.bmcproxy-db-mode
+  sudo -u bmcproxy DB_SSL_CA="${DB_SSL_CA:-}" python3 - "$h" "$p" "$u" "$d" <<'PY' || die "Không kết nối được MySQL (xem lỗi ở trên). config.json chưa bị đổi."
+import os, ssl, sys, pymysql
 h, p, u, d = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 pw = open("/etc/bmcproxy/db.pass").read().strip()
+ca = os.environ.get("DB_SSL_CA") or ""
+ctx = ssl.create_default_context(cafile=ca or None)
+if not ca:  # chung chi tu ky mac dinh cua MySQL: van ma hoa, khong kiem tra ten
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+mode = "tls"
 try:
-    c = pymysql.connect(host=h, port=p, user=u, password=pw, database=d, connect_timeout=8)
+    try:
+        c = pymysql.connect(host=h, port=p, user=u, password=pw, database=d, connect_timeout=8, ssl=ctx)
+    except pymysql.err.OperationalError as e:
+        if e.args and e.args[0] in (1045, 1049):
+            raise
+        print(f"    !! MySQL không nhận TLS ({e.args[1] if len(e.args) > 1 else e}) - thử không mã hoá")
+        mode = "plain"
+        c = pymysql.connect(host=h, port=p, user=u, password=pw, database=d, connect_timeout=8)
 except pymysql.err.OperationalError as e:
     code = e.args[0] if e.args else 0
     hint = {1045: "sai tài khoản / mật khẩu, hoặc user không được phép từ IP máy này",
@@ -533,16 +548,24 @@ except pymysql.err.OperationalError as e:
             2003: "không tới được cổng MySQL (firewall / bind-address / sai IP)"}.get(code, "")
     sys.exit(f"    LỖI MySQL {code}: {e.args[1] if len(e.args) > 1 else e}" + (f"\n    -> {hint}" if hint else ""))
 cur = c.cursor(); cur.execute("SELECT VERSION()"); print("    OK MySQL", cur.fetchone()[0])
+cur.execute("SHOW SESSION STATUS LIKE 'Ssl_cipher'"); row = cur.fetchone()
+if mode == "tls" and row and row[1]:
+    print(f"    OK kết nối mã hoá TLS ({row[1]})" + (", đã kiểm tra chứng chỉ" if ca else ""))
+else:
+    mode = "plain"
+    print("    !! kết nối KHÔNG mã hoá - bật TLS trên MySQL (MySQL 8 có sẵn), hoặc chỉ dùng trong mạng riêng / VPN")
+open("/tmp/.bmcproxy-db-mode", "w").write(mode)
 cur.execute("CREATE TABLE IF NOT EXISTS bmcproxy_check (id INT PRIMARY KEY)"); cur.execute("DROP TABLE bmcproxy_check")
 print("    OK có quyền tạo bảng")
 PY
   cp -a "$APP/config.json" "$APP/config.json.bak-$(date +%Y%m%d-%H%M%S)"
-  python3 - "$APP/config.json" "$h" "$p" "$u" "$d" <<'PY'
+  local mode; mode="$(cat /tmp/.bmcproxy-db-mode 2>/dev/null || echo plain)"; rm -f /tmp/.bmcproxy-db-mode
+  python3 - "$APP/config.json" "$h" "$p" "$u" "$d" "$mode" "${DB_SSL_CA:-}" <<'PY'
 import json, sys
-path, h, p, u, d = sys.argv[1:6]
+path, h, p, u, d, mode, ca = sys.argv[1:8]
 c = json.load(open(path, encoding="utf-8"))
 c["db"] = {"type": "mysql", "host": h, "port": int(p), "user": u, "database": d,
-           "password_file": "/etc/bmcproxy/db.pass", "ssl": False}
+           "password_file": "/etc/bmcproxy/db.pass", "ssl": mode == "tls", "ssl_verify": bool(ca), "ssl_ca": ca}
 json.dump(c, open(path, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
 print("    OK config.json: db -> mysql")
 PY

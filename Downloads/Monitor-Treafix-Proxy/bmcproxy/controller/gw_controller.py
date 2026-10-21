@@ -40,6 +40,11 @@ INSTALL_SCRIPT = '#!/usr/bin/env bash\n# Treafix Proxy BB - cai agent cho site _
 SESSION_TTL = 12 * 3600          # phien thuong (cookie mat khi dong trinh duyet)
 REMEMBER_TTL = 30 * 24 * 3600   # "Ghi nho dang nhap"
 MAX_BACKUPS = 50
+AUDIT_MAX_BYTES = 20 * 1024 * 1024   # audit.log qua 20 MB -> audit.log.1 ... giu 5 file
+AUDIT_KEEP = 5
+ACCOUNT_MAX_FAILS = 10               # sai 10 lan lien tiep (tu moi IP) -> khoa tai khoan 15 phut
+ACCOUNT_LOCK_SECONDS = 900
+LDAP_RECHECK_SECONDS = 3600          # tai khoan AD: hoi lai AD moi 1 gio (tat / ra khoi nhom -> dang xuat)
 
 CONTROLLER_DEFAULTS = {
     "listen_host": "0.0.0.0",
@@ -110,6 +115,22 @@ def _diff(old, new, a, b):
 # =========================================================================== #
 # Du lieu
 # =========================================================================== #
+
+def tail_lines(path, n, block=65536):
+    """n dong cuoi cua file ma khong doc ca file (audit.log co the lon)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            pos, data = f.tell(), b""
+            while pos > 0 and data.count(b"\n") <= n:
+                step = min(block, pos)
+                pos -= step
+                f.seek(pos)
+                data = f.read(step) + data
+    except FileNotFoundError:
+        return []
+    return [ln.decode("utf-8", "replace") for ln in data.splitlines()[-n:] if ln.strip()]
+
 
 class Store:
     FILES = ("bmc.json", "settings.json", "sites.json", "users.json", "state.json", "templates.json", "auth.json")
@@ -253,8 +274,19 @@ class Store:
     def audit(self, user, action, detail="", site=""):
         rec = {"ts": now_iso(), "user": user, "action": action, "site": site, "detail": detail}
         line = json.dumps(rec, ensure_ascii=False)
-        with self.lock, open(self._p("audit.log"), "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        with self.lock:
+            path = self._p("audit.log")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                big = f.tell() > AUDIT_MAX_BYTES
+            if big:
+                try:
+                    for i in range(AUDIT_KEEP - 1, 0, -1):
+                        if os.path.exists(f"{path}.{i}"):
+                            os.replace(f"{path}.{i}", f"{path}.{i + 1}")
+                    os.replace(path, f"{path}.1")
+                except OSError as e:  # Windows: file dang mo o luong khac -> lan ghi sau thu lai
+                    sys.stderr.write(f"không xoay vòng được audit.log: {e}\n")
         if self.db:
             try:
                 self.db.audit_add(rec)
@@ -267,11 +299,9 @@ class Store:
                 return self.db.audit_read(limit)
             except Exception as e:
                 self.db_error = f"{type(e).__name__}: {e}"
-        try:
-            with open(self._p("audit.log"), encoding="utf-8") as f:
-                lines = f.readlines()[-limit:]
-        except FileNotFoundError:
-            return []
+        lines = tail_lines(self._p("audit.log"), limit)
+        if len(lines) < limit:  # vua xoay vong: lay them o file cu
+            lines = tail_lines(self._p("audit.log.1"), limit - len(lines)) + lines
         out = []
         for ln in reversed(lines):
             try:
@@ -342,7 +372,9 @@ class App:
         self.install_codes = {}  # hash(ma cai) -> {site, exp, by, used_at, ip}
         # hash(ma phien) -> (user, het han, ip, luc tao, ghi nho). Luu ra data/sessions.json (chi ban bam)
         self.sessions = self._load_sessions()
-        self.fails = {}
+        self.fails = {}         # ip -> (so lan sai, het han)
+        self.acct_fails = {}    # tai khoan -> (so lan sai, het han)
+        self.ldap_checked = {}  # tai khoan AD -> luc kiem tra lai gan nhat
         self.slock = threading.Lock()
         self.started = now_iso()
 
@@ -404,16 +436,64 @@ class App:
         rec = self.store.users.get(s[0])
         if not rec or self.blocked_reason(rec):
             return None
+        if rec.get("source") == "ldap":
+            self._ldap_recheck(s[0])
         return s[0]
+
+    def _ldap_recheck(self, name):
+        """Moi LDAP_RECHECK_SECONDS hoi lai AD (chay nen, can tai khoan dich vu). Bi tat / xoa / ra khoi
+        nhom -> dang xuat moi phien. AD khong tra loi -> giu phien (lan sau thu lai)."""
+        lc = self.store.auth.get("ldap") or {}
+        now = time.time()
+        with self.slock:
+            if not (lc.get("enabled") and lc.get("bind_dn") and gw_ldap.available()):
+                return
+            if now - self.ldap_checked.get(name, 0) < LDAP_RECHECK_SECONDS:
+                return
+            self.ldap_checked[name] = now
+
+        def run():
+            st = self.store
+            try:
+                info = gw_ldap.lookup(lc, name)
+                if info is None:
+                    why = "không còn / đã bị tắt trên AD"
+                else:
+                    with st.lock:
+                        rec = st.users.get(name)
+                        if not rec:
+                            return
+                        try:
+                            role, sites = gw_ldap.decide(lc, info, rec)
+                        except gw_ldap.LdapError:
+                            role = None
+                        if role is not None:
+                            sites = [x for x in sites if x in st.sites]
+                            if (rec.get("role"), rec.get("sites") or []) != (role, sites):
+                                rec.update(role=role, sites=sites, ldap_groups=info["groups"][:60])
+                                st.save("users.json")
+                                st.audit("AD", "user-edit", f"{name}: nhóm AD đổi → {role}")
+                            return
+                    why = "không còn thuộc nhóm AD nào được phép"
+                self.drop_user_sessions(name)
+                st.audit("AD", "user-logout", f"{name}: {why} - đăng xuất mọi phiên")
+            except gw_ldap.LdapError as e:
+                sys.stderr.write(f"AD: kiểm tra lại {name} lỗi: {e}\n")
+            except Exception:  # khong de luong nen lam sap web
+                traceback.print_exc()
+
+        threading.Thread(target=run, daemon=True, name=f"ldap-recheck-{name}").start()
 
     def drop_session(self, token):
         with self.slock:
             if token and self.sessions.pop(hash_token(token), None):
                 self._save_sessions()
 
-    def drop_user_sessions(self, name):
+    def drop_user_sessions(self, name, keep_token=None):
+        """Xoa moi phien cua tai khoan (tru phien keep_token - phien dang dung de doi mat khau)."""
+        keep = hash_token(keep_token) if keep_token else None
         with self.slock:
-            for t in [t for t, s in self.sessions.items() if s[0] == name]:
+            for t in [t for t, s in self.sessions.items() if s[0] == name and t != keep]:
                 del self.sessions[t]
             self._save_sessions()
 
@@ -422,14 +502,32 @@ class App:
             n, until = self.fails.get(ip, (0, 0))
             return not (n >= 5 and until > time.time())
 
-    def login_failed(self, ip):
+    def login_failed(self, ip, name=""):
+        """-> True neu lan sai nay lam khoa tai khoan."""
+        now = time.time()
         with self.slock:
+            if len(self.fails) > 5000 or len(self.acct_fails) > 5000:  # don ban ghi het han
+                for d in (self.fails, self.acct_fails):
+                    for k in [k for k, v in d.items() if v[1] < now]:
+                        del d[k]
             n, _ = self.fails.get(ip, (0, 0))
-            self.fails[ip] = (n + 1, time.time() + 300)
+            self.fails[ip] = (n + 1, now + 300)
+            if not name:
+                return False
+            n, until = self.acct_fails.get(name, (0, 0))
+            n = n + 1 if until > now else 1
+            self.acct_fails[name] = (n, now + ACCOUNT_LOCK_SECONDS)
+            return n == ACCOUNT_MAX_FAILS
 
-    def login_ok(self, ip):
+    def account_locked(self, name):
+        with self.slock:
+            n, until = self.acct_fails.get(name, (0, 0))
+            return n >= ACCOUNT_MAX_FAILS and until > time.time()
+
+    def login_ok(self, ip, name=""):
         with self.slock:
             self.fails.pop(ip, None)
+            self.acct_fails.pop(name, None)
 
     # ------------------------------------------------------------ quyen
     def user(self, name):
@@ -775,6 +873,8 @@ def make_handler(app):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
+            if isinstance(self.connection, ssl.SSLSocket):
+                self.send_header("Strict-Transport-Security", "max-age=31536000")
             self.send_header("Content-Security-Policy",
                              "default-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "
                              "script-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
@@ -997,14 +1097,19 @@ def make_handler(app):
             data = self.body_json(10_000)
             name = str(data.get("user", ""))[:64]
             password = str(data.get("password", ""))
+            acct = gw_ldap.normalize_user(name) or name
+            if app.account_locked(name) or app.account_locked(acct):
+                app.login_failed(ip)
+                return self.err(429, f"Tài khoản tạm khoá {ACCOUNT_LOCK_SECONDS // 60} phút do sai mật khẩu nhiều lần")
             rec = st.users.get(name)
             lc = st.auth.get("ldap") or {}
             if rec and rec.get("source") != "ldap" or not (lc.get("enabled") and gw_ldap.available()):
                 # tai khoan rieng cua web (admin du phong van vao duoc khi AD hong)
                 if not rec or rec.get("source") == "ldap" or not check_password(rec, password):
-                    app.login_failed(ip)
+                    locked = app.login_failed(ip, name if rec else "")
                     if rec:
-                        st.audit(name, "login-fail", f"{ip} sai mật khẩu")
+                        st.audit(name, "login-fail", f"{ip} sai mật khẩu"
+                                 + (f" - khoá tài khoản {ACCOUNT_LOCK_SECONDS // 60} phút" if locked else ""))
                     return self.err(401, "Sai tài khoản hoặc mật khẩu")
             else:
                 name, rec, msg = self.ldap_login(lc, name, password, ip)
@@ -1020,10 +1125,11 @@ def make_handler(app):
                     return self.send(401, {"error": "Nhập mã xác thực 2 lớp (6 số trên ứng dụng Authenticator)",
                                            "need_otp": True})
                 if not totp_check(rec["totp_secret"], otp):
-                    app.login_failed(ip)
+                    app.login_failed(ip, name)
                     st.audit(name, "login-fail", f"{ip} sai mã 2FA")
                     return self.send(401, {"error": "Mã xác thực 2 lớp không đúng", "need_otp": True})
-            app.login_ok(ip)
+            app.login_ok(ip, name)
+            app.ldap_checked[name] = time.time()
             remember = bool(data.get("remember"))
             token = app.new_session(name, ip, remember)
             with st.lock:
@@ -1052,9 +1158,10 @@ def make_handler(app):
                 role, sites = gw_ldap.decide(lc, info, local)
             except gw_ldap.LdapError as e:
                 if e.kind == "bad":
-                    app.login_failed(ip)
+                    locked = app.login_failed(ip, name)
                     if local:
-                        st.audit(name, "login-fail", f"{ip} AD: {e}")
+                        st.audit(name, "login-fail", f"{ip} AD: {e}"
+                                 + (f" - khoá {ACCOUNT_LOCK_SECONDS // 60} phút" if locked else ""))
                     return None, None, self.err(401, str(e))
                 st.audit(name, "login-fail", f"{ip} AD: {e}")
                 if e.kind == "denied":
@@ -1183,8 +1290,10 @@ def make_handler(app):
                     st.users[u["name"]].pop("must_change", None)
                     st.users[u["name"]]["password_changed"] = now_iso()
                     st.save("users.json")
-                st.audit(u["name"], "password")
-                return self.send(200, {"ok": True})
+                n = len(app.user_sessions(u["name"])) - 1
+                app.drop_user_sessions(u["name"], keep_token=self.cookie_token())
+                st.audit(u["name"], "password", f"đăng xuất {n} phiên khác" if n > 0 else "")
+                return self.send(200, {"ok": True, "dropped": max(n, 0)})
             if res == "2fa" and method == "POST":
                 return self.api_2fa(u)
 
@@ -1850,6 +1959,12 @@ def make_handler(app):
             if st.db and st.db_error and u["role"] == "admin":
                 w.append({"level": "danger", "site": "",
                           "text": f"Mất kết nối cơ sở dữ liệu {st.db.describe()}: {st.db_error[:160]}"})
+            dbc = st.cfg.get("db") or {}
+            if (st.db and dbc.get("type") == "mysql" and not dbc.get("ssl") and u["role"] == "admin"
+                    and dbc.get("host") not in ("127.0.0.1", "localhost", "::1")):
+                w.append({"level": "warn", "site": "",
+                          "text": "Kết nối MySQL chưa mã hoá (mật khẩu, dữ liệu đi qua mạng dạng rõ). "
+                                  "Chạy lại: sudo bash install.sh db"})
             for k in app.visible_sites(u):
                 s = app.site_status(k)
                 if not s["token_set"]:
