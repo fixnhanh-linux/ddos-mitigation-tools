@@ -297,7 +297,7 @@ function route() {
   $("#page-title").textContent = PAGES[page].title;
   $("#page-sub").textContent = PAGES[page].sub;
   headActions(page);
-  $("#sidebar").classList.remove("open");
+  setMenu(false);
   if (page === "traefik") loadTraefik();
   if (page === "backups") loadBackups();
   if (page === "audit") loadAudit();
@@ -308,7 +308,14 @@ function route() {
   if (page === "settings") renderSettings();
 }
 window.addEventListener("hashchange", route);
-$("#btn-menu").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
+// Dien thoai: menu truot ra, bam ra ngoai / chon muc / Esc de dong
+function setMenu(open) {
+  $("#sidebar").classList.toggle("open", open);
+  $("#menu-backdrop").classList.toggle("hidden", !open);
+}
+$("#btn-menu").addEventListener("click", () => setMenu(!$("#sidebar").classList.contains("open")));
+$("#menu-backdrop").addEventListener("click", () => setMenu(false));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#sidebar").classList.contains("open")) setMenu(false); });
 
 // Thu gọn menu chỉ còn icon (nhớ theo trình duyệt & tự động thích ứng)
 function setCollapsed(on) {
@@ -846,6 +853,9 @@ function renderBmcs() {
       <td>${sec}</td><td>${routerCell(b)}</td><td>${accessCell(b)}</td>
       <td class="cell-sub">${esc(b.note)}${tagHtml || expTag ? `<div class="tag-row">${tagHtml}${expTag}</div>` : ""}</td></tr>`;
   }).join("");
+  // o chi co "—" (khong co console / router / luot truy cap): an tren dien thoai cho the BMC gon
+  $$("#bmc-table tbody td").forEach((td) => td.classList.toggle("is-dash",
+    /^[—-]$/.test(td.textContent.trim()) && !td.querySelector("input, a, button")));
   renderBulkBar();
   $("#bmc-empty").classList.toggle("hidden", state.bmcs.length > 0);
   $("#bmc-nomatch").classList.toggle("hidden", !state.bmcs.length || rows.length > 0);

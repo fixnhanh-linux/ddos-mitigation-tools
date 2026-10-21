@@ -274,7 +274,7 @@
     <section class="page hidden" id="page-backups">
       <div class="panel note">Bản sao lưu chứa danh sách BMC, site và cài đặt (không chứa tài khoản). Khôi phục xong cần bấm <b>Áp dụng</b> để đẩy xuống các server. Mỗi server còn tự sao lưu cấu hình Traefik trước khi áp dụng.</div>
       <div class="panel flush"><div class="table-wrap">
-        <table class="table"><thead><tr><th>Thời điểm</th><th>Loại</th><th>BMC theo site</th><th></th></tr></thead>
+        <table class="table stack"><thead><tr><th>Thời điểm</th><th>Loại</th><th>BMC theo site</th><th></th></tr></thead>
           <tbody id="backup-list"></tbody></table>
       </div></div>
     </section>
@@ -282,7 +282,7 @@
     <!-- Người dùng -->
     <section class="page hidden" id="page-users">
       <div class="panel flush"><div class="table-wrap">
-        <table class="table"><thead><tr><th>Tài khoản</th><th>Vai trò</th><th>Phạm vi</th><th>Trạng thái</th>
+        <table class="table stack stack-main" id="user-table"><thead><tr><th>Tài khoản</th><th>Vai trò</th><th>Phạm vi</th><th>Trạng thái</th>
           <th>Đăng nhập cuối</th><th>Phiên</th><th></th></tr></thead>
           <tbody id="user-list"></tbody></table>
       </div></div>
@@ -431,6 +431,7 @@
 
 <!-- ============================== Ngăn sửa BMC ============================== -->
 <div id="drawer-backdrop" class="backdrop hidden"></div>
+<div id="menu-backdrop" class="backdrop menu-backdrop hidden"></div>
 <aside id="drawer" class="drawer" aria-hidden="true">
   <form id="bmc-form" class="drawer-inner" novalidate>
     <header class="drawer-head">
