@@ -129,6 +129,70 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(kept["telegram"]["bot_token"], self.cfg["telegram"]["bot_token"])
 
 
+# ====================================================================== ap dung: cong bi chiem
+class SkipBusyPortTest(unittest.TestCase):
+    def test_skip_bmc_with_busy_port(self):
+        import gw_agent
+        from gw_common import hash_password
+        from gw_controller import Store, load_controller_config
+        tmp = tempfile.mkdtemp(prefix="bmcproxy-busy-")
+        busy = socket.socket()
+        busy.bind(("0.0.0.0", 0))
+        busy.listen(1)
+        bport = busy.getsockname()[1]          # "chuong trinh khac" dang giu cong nay
+        try:
+            cfgp = os.path.join(tmp, "config.json")
+            with open(cfgp, "w") as f:
+                json.dump({"data_dir": os.path.join(tmp, "data"), "backup_dir": os.path.join(tmp, "bk")}, f)
+            st = Store(load_controller_config(cfgp))
+            st.sites["hcm"] = {"key": "hcm", "label": "HCM", "domain": "p.example.net", "overrides": {}}
+            from gw_common import BMC_DEFAULTS
+            free1, free2 = free_port(), free_port()
+            st.bmcs += [{**BMC_DEFAULTS, "site": "hcm", "port": free1, "upstream": "https://10.0.0.5"},
+                        {**BMC_DEFAULTS, "site": "hcm", "port": free2, "upstream": "https://10.0.0.6",
+                         "console_port": bport, "console_upstream": "https://10.0.0.6:5900"}]
+            rel = st.desired("hcm")
+            cfg = {**gw_agent.AGENT_DEFAULTS, "site": "hcm", "data_dir": os.path.join(tmp, "agent"),
+                   "traefik_static_file": os.path.join(tmp, "tr", "traefik.yml"),
+                   "traefik_dynamic_dir": os.path.join(tmp, "tr", "dyn"),
+                   "traefik_restart_cmd": [sys.executable, "-c", "print('restart')"], "traefik_stop_cmd": [],
+                   "nginx_conf_dir": os.path.join(tmp, "nginx"), "nginx_test_cmd": [], "nginx_reload_cmd": [],
+                   "port_owner_cmd": []}
+            os.makedirs(cfg["data_dir"])
+            a = gw_agent.Agent(cfg)
+            a.verify = lambda r, restarted: (True, "ok")
+            res = a.apply_release(rel)
+            self.assertTrue(res["ok"], res["log"])
+            self.assertEqual([x["port"] for x in res["skipped"]], [free2])
+            self.assertEqual(res["skipped"][0]["busy"], [bport])
+            self.assertEqual([b["port"] for b in a.release["bmcs"]], [free1])     # BMC con lai van chay
+            static = open(cfg["traefik_static_file"], encoding="utf-8").read()
+            self.assertIn(f":{free1}", static)
+            self.assertNotIn(f":{bport}", static)
+            self.assertTrue(any(w["text"].startswith(f"BMC {free2} chưa chạy") for w in a.local_warnings()))
+            # giai phong cong -> Thu lai: BMC vao lai
+            busy.close()
+            res = a.apply_release(rel)
+            self.assertTrue(res["ok"], res["log"])
+            self.assertEqual(res["skipped"], [])
+            self.assertIn(f":{bport}", open(cfg["traefik_static_file"], encoding="utf-8").read())
+            # tat che do bo qua -> huy ca lan nhu ban cu
+            busy2 = socket.socket()
+            busy2.bind(("0.0.0.0", 0))
+            busy2.listen(1)
+            st.bmcs.append({**BMC_DEFAULTS, "site": "hcm", "port": busy2.getsockname()[1], "upstream": "https://10.0.0.7"})
+            a.cfg["skip_busy_ports"] = False
+            res = a.apply_release(st.desired("hcm"))
+            busy2.close()
+            self.assertFalse(res["ok"])
+        finally:
+            try:
+                busy.close()
+            except OSError:
+                pass
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ====================================================================== web that + agent
 class SiteTest(unittest.TestCase):
     @classmethod

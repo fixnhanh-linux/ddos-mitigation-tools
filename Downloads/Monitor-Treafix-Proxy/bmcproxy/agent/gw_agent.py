@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from gw_auth import AuthGateway, start_auth_server
 from gw_limit import LimitManager
-from gw_common import (BUILD, SETTINGS_DEFAULTS, bmc_ports, VERSION, ValidationError, cert_info, http_json, validate_dashboard,
+from gw_common import (BMC_DEFAULTS, BUILD, SETTINGS_DEFAULTS, bmc_ports, VERSION, ValidationError, cert_info, http_json, validate_dashboard,
                        is_managed, now_iso, read_json, read_text, run_cmd, upstream_host_port,
                        validate_bmc_fields, validate_settings_values, write_json, write_text_atomic)
 from gw_nginx import DISABLED_SUFFIX, nginx_ports, scan_nginx_dir
@@ -45,6 +45,10 @@ AGENT_DEFAULTS = {
     "entrypoint_host": "",
     "verify_wait": 15,
     "verify_ports": True,
+    # Cong moi bi chuong trinh khac giu: True = bo rieng BMC do, ap dung phan con lai (thu lai sau);
+    # False = huy ca lan ap dung nhu ban cu
+    "skip_busy_ports": True,
+    "port_owner_cmd": ["ss", "-ltnpH"],   # xem chuong trinh nao dang giu cong (bao len web)
     "nginx_conf_dir": "/etc/nginx/conf.d",
     "nginx_test_cmd": ["nginx", "-t"],
     "nginx_reload_cmd": ["systemctl", "reload", "nginx"],
@@ -193,6 +197,7 @@ class Agent:
         self.pool = ThreadPoolExecutor(max_workers=16)
         self.controller_ok = None
         self.last_contact = None
+        self.skipped = read_json(self._p("skipped.json"), [])     # BMC bi bo qua o lan ap dung gan nhat
 
     def _p(self, name):
         return os.path.join(self.dir, name)
@@ -268,6 +273,9 @@ class Agent:
                 if port in ours and fname not in legacy:
                     w.append({"level": "danger",
                               "text": f"Cổng {port} đang bị nginx ({fname}) dùng"})
+        for x in self.skipped or []:
+            w.append({"level": "danger", "text": f"BMC {x['port']} chưa chạy: cổng {x.get('owner') or x.get('busy')} "
+                                                 "đang bị chương trình khác dùng - tắt chương trình đó rồi bấm Thử lại"})
         if self.legacy_active():
             w.append({"level": "info",
                       "text": f"Còn {len(self.legacy_active())} file nginx cũ, sẽ tắt ở lần áp dụng tới"})
@@ -381,7 +389,7 @@ class Agent:
             result = {"ok": False, "log": [{"step": "Lỗi bất ngờ", "ok": False,
                                             "output": f"{type(e).__name__}: {e}"}]}
         self.attempt = {"rev": target["rev"], "attempt": target["attempt"], "ok": result["ok"],
-                        "log": result["log"], "at": now_iso()}
+                        "log": result["log"], "at": now_iso(), "skipped": result.get("skipped") or []}
         write_json(self._p("attempt.json"), self.attempt)
         log(f"kết quả: {'thành công' if result['ok'] else 'LỖI - đã khôi phục'}")
         try:
@@ -628,6 +636,31 @@ class Agent:
             elif not enabled and os.path.isfile(on):
                 os.replace(on, off)
 
+    @staticmethod
+    def bmc_ports_of(b):
+        b = {**BMC_DEFAULTS, **b}
+        ports = [b["port"]] + ([b["console_port"]] if b.get("console_port") else [])
+        return ports + [t["proxy"] for t in b.get("tcp_ports") or []]
+
+    def port_owners(self, ports):
+        """{cong: "Xvnc (pid 1234)"} - doc tu ss -ltnp (de nguoi dung biet tat chuong trinh nao)."""
+        ok, out = run_cmd(self.cfg.get("port_owner_cmd") or [], timeout=10)
+        res = {}
+        if not ok or not out:
+            return res
+        # LISTEN 0 4096 0.0.0.0:5901 0.0.0.0:* users:(("Xvnc",pid=1234,fd=6))
+        for line in out.splitlines():
+            cols = line.split()
+            if len(cols) < 5:
+                continue
+            local = cols[3].rsplit(":", 1)
+            if len(local) != 2 or not local[1].isdigit() or int(local[1]) not in ports:
+                continue
+            procs = re.findall(r'"([^"]+)",pid=(\d+)', line)
+            who = ", ".join(sorted({f"{n} (pid {p})" for n, p in procs})) or "không rõ (cần chạy agent bằng root)"
+            res.setdefault(int(local[1]), who)
+        return res
+
     def busy_new_ports(self, rel, old_static):
         """Traefik se dung han neu khong mo duoc mot entryPoint -> kiem tra truoc khi restart."""
         old = {int(p) for p in re.findall(r'address: "[^"]*:(\d+)"', old_static or "")}
@@ -689,8 +722,9 @@ class Agent:
             for err in self.limits.sync(previous_active, rel):  # bo gioi han ket noi phai co truoc Traefik
                 log_.append({"step": "Giới hạn kết nối", "ok": False, "output": err})
             restarted, ok = False, True
+            skipped = []
+            ddir = c["traefik_dynamic_dir"]
             try:
-                ddir = c["traefik_dynamic_dir"]
                 os.makedirs(ddir, exist_ok=True)
                 for x in changes:
                     if x["area"] != "dynamic":
@@ -705,6 +739,7 @@ class Agent:
                 n = sum(x["area"] == "dynamic" for x in changes)
                 log_.append({"step": "Ghi config", "ok": True,
                              "output": f"{n} file dynamic" + (", traefik.yml" if static_changed else "")})
+                nginx_map = nginx_ports(c.get("nginx_conf_dir")) if to_disable else {}  # cong -> file (truoc khi tat)
                 if to_disable:
                     self.set_nginx(to_disable, False)
                     ok, out = run_cmd(c["nginx_test_cmd"])
@@ -717,11 +752,55 @@ class Agent:
                     if to_disable:
                         time.sleep(1)
                     busy = self.busy_new_ports(rel, old_static)
+                    if busy and c.get("skip_busy_ports", True):
+                        owners = self.port_owners(set(busy))
+                        drop = [b for b in rel["bmcs"] if set(self.bmc_ports_of(b)) & set(busy)]
+                        keep = [b for b in rel["bmcs"] if b not in drop]
+                        if drop:
+                            # Ap dung phan con lai: viet lai config khong co cac BMC nay roi kiem tra lai
+                            rel = {**rel, "bmcs": keep}
+                            self.active = rel
+                            changes2, static, dyn = self.plan(rel)
+                            for x in changes2:
+                                if x["area"] != "dynamic":
+                                    continue
+                                path = os.path.join(ddir, x["file"])
+                                if x["kind"] == "delete":
+                                    if os.path.exists(path):
+                                        os.remove(path)
+                                else:
+                                    write_text_atomic(path, dyn[x["file"]])
+                            write_text_atomic(sp, static)
+                            static_changed = static != old_static
+                            skipped = []
+                            for b in drop:
+                                ps = sorted(set(self.bmc_ports_of(b)) & set(busy))
+                                skipped.append({"port": b["port"], "note": b.get("note", ""), "busy": ps,
+                                                "owner": "; ".join(f"{p}: {owners.get(p, 'không rõ')}" for p in ps)})
+                            log_.append({"step": f"Bỏ qua {len(skipped)} BMC (cổng đang bị chương trình khác dùng)",
+                                         "ok": True, "warn": True, "output": "\n".join(
+                                             f"BMC {x['port']}{' · ' + x['note'] if x['note'] else ''}: cổng {x['owner']}"
+                                             for x in skipped)
+                                         + "\nCác BMC khác vẫn áp dụng. Tắt chương trình đang giữ cổng (hoặc đổi cổng BMC) rồi bấm Thử lại."})
+                            # BMC bi bo qua truoc day chay bang nginx: bat lai file nginx cua no (neu file do chi
+                            # nghe cong cua BMC bi bo qua) de BMC khong mat han; lan ap dung sau se tat lai
+                            dropped = {p for b in drop for p in self.bmc_ports_of(b)}
+                            kept_ports = set(entry_ports(rel))
+                            back = sorted({f for p, f in nginx_map.items() if p in dropped and f in to_disable
+                                           and not ({q for q, g in nginx_map.items() if g == f} & kept_ports)})
+                            if back:
+                                self.set_nginx(back, True)
+                                to_disable = [f for f in to_disable if f not in back]
+                                ok2, out2 = run_cmd(c["nginx_reload_cmd"])
+                                log_.append({"step": f"Giữ lại {len(back)} file nginx của BMC bị bỏ qua", "ok": ok2,
+                                             "warn": True, "output": ", ".join(back) + ("\n" + out2 if out2 else "")})
+                            busy = self.busy_new_ports(rel, old_static) if static_changed else []
                     if busy:
                         ok = False
+                        owners = self.port_owners(set(busy))
                         log_.append({"step": "Kiểm tra cổng trống", "ok": False,
                                      "output": "Cổng đang bị chương trình khác dùng: "
-                                               + ", ".join(map(str, busy))
+                                               + ", ".join(f"{p} ({owners.get(p, 'không rõ')})" for p in busy)
                                                + ". Không restart Traefik để tránh làm sập mọi BMC."})
                 if ok and (static_changed or to_disable):
                     ok, out = run_cmd(c["traefik_restart_cmd"])
@@ -737,6 +816,8 @@ class Agent:
             if ok:
                 self.release = rel
                 write_json(self._p("release.json"), rel)
+                self.skipped = skipped
+                write_json(self._p("skipped.json"), skipped)
                 self.limits.sync(rel)
                 gone = set(to_disable)
                 self.legacy = [f for f in self.legacy if f not in gone]
@@ -756,7 +837,7 @@ class Agent:
                 if to_disable:
                     out.append("bật lại nginx: " + run_cmd(c["nginx_reload_cmd"])[1])
                 log_.append({"step": "Khôi phục", "ok": True, "output": "\n".join(out)})
-            return {"ok": ok, "log": log_}
+            return {"ok": ok, "log": log_, "skipped": skipped if ok else []}
 
     # ------------------------------------------------------------ chay
     def run(self, once=False):

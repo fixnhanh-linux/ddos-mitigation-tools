@@ -578,6 +578,8 @@ function renderSites() {
         <div class="row"><span>Agent</span><span>${s.online ? `trực tuyến · ${esc(s.hostname || "")} ${s.remote_ip ? `(${esc(s.remote_ip)})` : ""}`
         : s.token_set ? `<b class="tag bad">mất liên lạc</b> ${s.last_seen ? `từ ${esc(fmtTs(s.last_seen))}` : "chưa từng kết nối"}` : '<span class="tag warn">chưa có token</span>'}</span></div>
         <div class="row"><span>Traefik</span><span>${s.traefik.reachable ? `v${esc(s.traefik.version)} · ${s.traefik.entrypoints} cổng` : "—"}</span></div>
+        ${(s.skipped || []).length ? `<div class="row"><span>Bỏ qua</span><span>${s.skipped.map((x) => `<span class="tag bad" title="${esc(x.owner || "")}">BMC ${x.port}</span>`).join(" ")}
+          <div class="cell-sub">cổng đang bị chương trình khác dùng - xử lý xong bấm Thử lại</div></span></div>` : ""}
         ${s.online ? `<div class="row"><span>Bản agent</span><span class="mono">${esc(s.agent_build || s.agent_version || "?")}
           ${agentOutdated(s) ? `<span class="tag warn" title="Web có bản ${esc(s.agent_pkg_build)}">có bản mới</span>` : ""}</span></div>` : ""}
         ${s.online && s.sysinfo && s.sysinfo.os ? `<div class="row"><span>Server</span><span>${sysLine(s.sysinfo)}</span></div>` : ""}
@@ -595,7 +597,7 @@ function renderSites() {
       <footer class="site-actions">
         <div class="sa-main">
           ${edit && ["pending", "failed"].includes(s.phase) ? `<button class="btn primary" data-site-act="apply" data-site="${k}">${SITE_ICO.play}Áp dụng</button>` : ""}
-          ${edit && s.phase === "failed" ? `<button class="btn" data-site-act="retry" data-site="${k}">${SITE_ICO.retry}Thử lại</button>` : ""}
+          ${edit && (s.phase === "failed" || (s.skipped || []).length) ? `<button class="btn" data-site-act="retry" data-site="${k}" title="Áp dụng lại (kể cả BMC bị bỏ qua)">${SITE_ICO.retry}Thử lại</button>` : ""}
           ${isAdmin() && !s.online ? `<button class="btn primary-soft" data-site-act="install" data-site="${k}">${SITE_ICO.terminal}Cài agent</button>` : ""}
           <a class="btn" href="#bmcs" data-goto-site="${k}">${SITE_ICO.list}Xem BMC</a>
 
@@ -1052,8 +1054,10 @@ function renderDiff(diff) {
 
 function renderLog(rep) {
   if (!rep || !rep.log) return '<p class="hint">Chưa có kết quả.</p>';
-  return `<div class="result-banner ${rep.ok ? "ok" : "bad"}">${rep.ok ? "Áp dụng thành công" : "Áp dụng thất bại — server đã khôi phục cấu hình cũ"} · ${esc(fmtTs(rep.at))} · bản ${esc(rep.rev)}</div>` +
-    rep.log.map((s) => `<div class="step ${s.ok ? "ok" : "bad"}"><span class="mark">${s.ok ? "✓" : "✕"}</span>
+  const part = rep.ok && (rep.skipped || []).length;
+  return `<div class="result-banner ${part ? "warn" : rep.ok ? "ok" : "bad"}">${part ? `Áp dụng một phần — bỏ qua ${rep.skipped.length} BMC có cổng đang bị chương trình khác dùng`
+    : rep.ok ? "Áp dụng thành công" : "Áp dụng thất bại — server đã khôi phục cấu hình cũ"} · ${esc(fmtTs(rep.at))} · bản ${esc(rep.rev)}</div>` +
+    rep.log.map((s) => `<div class="step ${s.warn ? "warn" : s.ok ? "ok" : "bad"}"><span class="mark">${s.warn ? "!" : s.ok ? "✓" : "✕"}</span>
       <b>${esc(s.step)}</b><pre class="code">${esc(s.output || "")}</pre></div>`).join("");
 }
 

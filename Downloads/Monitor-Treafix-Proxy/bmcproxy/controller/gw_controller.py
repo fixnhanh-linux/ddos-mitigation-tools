@@ -985,6 +985,7 @@ class App:
             "sysinfo": h.get("sysinfo") or {},
             "extra_at": {k: (v or {}).get("at") for k, v in (self.extra.get(site) or {}).items()},
             "agent_build": h.get("build") or "",
+            "skipped": report.get("skipped") or [] if reported or report.get("ok") else [],
             "agent_pkg_build": (agent_pkg_info() or {}).get("build", ""),
             "history_count": len((state.get("history") or [])),
         }
@@ -1445,7 +1446,7 @@ def make_handler(app):
                         state = st.state.setdefault(site, {})
                         last = state.get("last_report") or {}
                         if (last.get("rev"), last.get("attempt")) != (att.get("rev"), att.get("attempt")):
-                            state["last_report"] = {k: att.get(k) for k in ("rev", "attempt", "ok", "log", "at")}
+                            state["last_report"] = {k: att.get(k) for k in ("rev", "attempt", "ok", "log", "at", "skipped")}
                             app.record_report(site, state["last_report"])
                             if att.get("ok"):
                                 state["applied"] = {"rev": att.get("rev"), "at": att.get("at")}
@@ -1456,13 +1457,19 @@ def make_handler(app):
             if name == "report":
                 with st.lock:
                     state = st.state.setdefault(site, {})
-                    state["last_report"] = {k: data.get(k) for k in ("rev", "attempt", "ok", "log", "at")}
+                    state["last_report"] = {k: data.get(k) for k in ("rev", "attempt", "ok", "log", "at", "skipped")}
                     app.record_report(site, state["last_report"])
                     if data.get("ok"):
                         state["applied"] = {"rev": data.get("rev"), "at": data.get("at")}
                     st.save("state.json")
+                skipped = data.get("skipped") or []
                 st.audit("agent", "apply-ok" if data.get("ok") else "apply-failed",
-                         f"rev {data.get('rev')}", site)
+                         f"rev {data.get('rev')}" + (f", bỏ qua BMC {', '.join(str(x.get('port')) for x in skipped)}"
+                                                     " (cổng bận)" if skipped else ""), site)
+                if data.get("ok") and skipped:
+                    app.notifier.event("apply_failed", f"⚠️ Áp dụng một phần ở site {st.sites[site]['label']}",
+                                       "\n".join(f"- BMC {x.get('port')}: cổng {x.get('owner')} đang bị chương trình khác dùng"
+                                                  for x in skipped[:10]) + "\nCác BMC khác đã áp dụng. Xử lý xong bấm Thử lại.")
                 if not data.get("ok"):
                     failed = [x for x in data.get("log") or [] if not x.get("ok")]
                     app.notifier.event("apply_failed", f"❌ Áp dụng lỗi ở site {st.sites[site]['label']}",

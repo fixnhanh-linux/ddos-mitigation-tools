@@ -1172,3 +1172,12 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 - nginx chỉ đặt `X-Real-IP $remote_addr` thì đổi `"real_ip_header": "X-Real-IP"`.
 - Proxy ở máy khác: thêm IP máy proxy vào `trusted_proxies`. Sửa xong `sudo systemctl restart bmcproxy`.
 - Agent đi qua proxy: danh sách **IP được phép** của site so với cả IP thật lẫn `127.0.0.1` (site cài từ trước vẫn chạy). Muốn chặt hơn: Sửa site → IP được phép chỉ để IP public của server site.
+
+## 32. Cổng bị chương trình khác dùng khi áp dụng
+
+Traefik **dừng hẳn** nếu không mở được một cổng. Vì vậy trước khi restart Traefik, agent kiểm tra các cổng mới.
+
+- Mặc định (`"skip_busy_ports": true` trong `agent.json`): BMC nào dùng cổng đang bị chương trình khác giữ thì **bị bỏ qua riêng**, các BMC khác vẫn áp dụng. Web hiện **"Áp dụng một phần"**, thẻ site có dòng **Bỏ qua: BMC …** kèm tên chương trình đang giữ cổng (lấy từ `ss -ltnp`, vd `5901: Xvnc (pid 1234)`), có gửi cảnh báo Telegram / email.
+- BMC bị bỏ qua mà trước đó chạy bằng nginx: agent **giữ lại file nginx** của nó, BMC vẫn vào được như cũ.
+- Xử lý: tắt chương trình đang giữ cổng (vd `sudo ss -ltnp | grep :5901` → `systemctl stop …`), hoặc đổi cổng của BMC trên web, rồi bấm **Thử lại** trên thẻ site.
+- `"skip_busy_ports": false`: huỷ cả lần áp dụng như bản cũ (khôi phục cấu hình cũ, không restart Traefik).
