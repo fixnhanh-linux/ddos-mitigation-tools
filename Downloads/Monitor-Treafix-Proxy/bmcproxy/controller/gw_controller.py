@@ -8,6 +8,7 @@ import datetime as dt
 import difflib
 import hmac
 import http.server
+import ipaddress
 import json
 import os
 import re
@@ -61,7 +62,57 @@ CONTROLLER_DEFAULTS = {
     "web_path": "",
     # Luu du lieu vao MySQL (tuy chon). Trong = file JSON trong data_dir. Xem gw_db.py
     "db": {},
+    # Web chay sau reverse proxy (nginx / Traefik) -> lay IP that cua nguoi dung tu header proxy ghi vao.
+    # Chi tin header khi yeu cau den TU cac dia chi nay (IP hoac dai CIDR). [] = khong tin, luon dung IP ket noi.
+    "trusted_proxies": ["127.0.0.1", "::1"],
+    # "X-Forwarded-For" (lay IP ngoai cung ben phai khong thuoc proxy tin cay) hoac "X-Real-IP"
+    "real_ip_header": "X-Forwarded-For",
 }
+
+
+def _ip_obj(v):
+    v = str(v or "").strip()
+    if v.startswith("[") and "]" in v:          # [2001:db8::1]:443
+        v = v[1:v.index("]")]
+    elif v.count(":") == 1:                      # 1.2.3.4:5678
+        v = v.split(":", 1)[0]
+    try:
+        return ipaddress.ip_address(v)
+    except ValueError:
+        return None
+
+
+def is_trusted_proxy(ip, trusted):
+    a = _ip_obj(ip)
+    if not a:
+        return False
+    for t in trusted or []:
+        try:
+            if a in ipaddress.ip_network(str(t), strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def real_client_ip(peer, headers, cfg):
+    """IP that cua nguoi goi. Chi doc header khi ket noi den tu proxy tin cay (khong de nguoi dung gia mao)."""
+    trusted = cfg.get("trusted_proxies") or []
+    if not is_trusted_proxy(peer, trusted):
+        return peer
+    if str(cfg.get("real_ip_header", "")).lower() == "x-real-ip":
+        a = _ip_obj(headers.get("X-Real-IP"))
+        return str(a) if a else peer
+    # X-Forwarded-For: client, proxy1, proxy2 -> moi proxy NOI THEM o cuoi. Phan ben trai do nguoi dung tu gui
+    # duoc, nen di tu phai sang trai, bo qua proxy tin cay, lay dia chi dau tien con lai.
+    chain = [x.strip() for x in ",".join(headers.get_all("X-Forwarded-For") or []).split(",") if x.strip()]
+    for x in reversed(chain):
+        a = _ip_obj(x)
+        if not a:
+            break
+        if not is_trusted_proxy(str(a), trusted):
+            return str(a)
+    return peer
 
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -1211,7 +1262,7 @@ def make_handler(app):
         def log_message(self, fmt, *args):
             if "/agent/v1/sync" in (getattr(self, "path", "") or ""):
                 return
-            sys.stderr.write("%s - %s\n" % (self.client_address[0], fmt % args))
+            sys.stderr.write("%s - %s\n" % (self.client_ip(), fmt % args))
 
         def send(self, code, body, ctype="application/json; charset=utf-8", headers=None):
             if not isinstance(body, (bytes, str)):
@@ -1281,7 +1332,8 @@ def make_handler(app):
                 self.end_headers()
                 self.close_connection = True
                 return
-            REQ.ip = self.client_address[0]
+            self._ip = None
+            REQ.ip = self.client_ip()
             REQ.ua = short_agent(self.headers.get("User-Agent"))
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
@@ -1334,6 +1386,11 @@ def make_handler(app):
                 return self.err(500, f"Lỗi máy chủ: {e}")
 
         # ------------------------------------------------------------ agent
+        def client_ip(self):
+            if getattr(self, "_ip", None) is None:
+                self._ip = real_client_ip(self.client_address[0], self.headers, st.cfg)
+            return self._ip
+
         def agent_site(self):
             auth = self.headers.get("Authorization") or ""
             site = self.headers.get("X-Agent-Site") or ""
@@ -1342,8 +1399,9 @@ def make_handler(app):
             if not s or not token or not s.get("token_hash") or \
                     not hmac.compare_digest(hash_token(token), s["token_hash"]):
                 return None
-            ip = self.client_address[0]
-            if s.get("allowed_ips") and ip not in s["allowed_ips"]:
+            allowed = s.get("allowed_ips") or []
+            # IP that (qua proxy) hoac IP ket noi truc tiep nam trong danh sach (site cu co san 127.0.0.1 van chay)
+            if allowed and self.client_ip() not in allowed and self.client_address[0] not in allowed:
                 return None
             return site
 
@@ -1351,7 +1409,7 @@ def make_handler(app):
             site = self.agent_site()
             if not site:
                 claimed = clean_text(self.headers.get("X-Agent-Site"), 40)
-                sys.stderr.write(f"agent bị từ chối: site={claimed!r} ip={self.client_address[0]} "
+                sys.stderr.write(f"agent bị từ chối: site={claimed!r} ip={self.client_ip()} "
                                  "(sai token, chưa có site, hoặc IP không nằm trong danh sách)\n")
                 return self.err(401, "Agent không hợp lệ (token / site / IP)")
             if method != "POST":
@@ -1359,7 +1417,7 @@ def make_handler(app):
             data = self.body_json()
             if name == "sync":
                 data["_received"] = time.time()
-                data["_ip"] = self.client_address[0]
+                data["_ip"] = self.client_ip()
                 act = data.get("action") if isinstance(data.get("action"), dict) else None
                 if act and act.get("name") == "update_agent":
                     st.audit("agent", "agent-update" if act.get("ok") else "agent-update-failed",
@@ -1465,7 +1523,7 @@ def make_handler(app):
 
         # ------------------------------------------------------------ dang nhap
         def api_login(self):
-            ip = self.client_address[0]
+            ip = self.client_ip()
             if not app.login_allowed(ip):
                 return self.err(429, "Sai quá nhiều lần, thử lại sau 5 phút")
             data = self.body_json(10_000)
@@ -2111,7 +2169,7 @@ def make_handler(app):
             return os.path.join(AGENT_PKG_DIR, pk[-1]) if pk else None
 
         def install_get(self, code, want_pkg):
-            ip = self.client_address[0]
+            ip = self.client_ip()
             rec = app.install_codes.get(hash_token(code))
             now = time.time()
             if want_pkg:

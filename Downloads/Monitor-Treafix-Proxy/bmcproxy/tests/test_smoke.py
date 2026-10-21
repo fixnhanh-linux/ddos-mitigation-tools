@@ -110,6 +110,15 @@ class WebTest(unittest.TestCase):
     def test_3_login_info(self):
         self.assertEqual(self.req("GET", "/api/login-info", cookie="")[2], {"ldap": False, "domain": ""})
 
+    def test_3c_real_ip_behind_proxy(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("POST", "/api/login", json.dumps({"user": "admin", "password": self.pw}),
+                  {"Content-Type": "application/json", "X-Forwarded-For": "6.6.6.6, 203.0.113.7"})
+        self.assertEqual(c.getresponse().status, 200)
+        c.close()
+        rows = self.req("GET", "/api/audit?limit=50")[2]
+        self.assertEqual(next(r for r in rows if r["action"] == "login")["ip"], "203.0.113.7")
+
     def test_3b_audit_has_ip(self):
         rows = self.req("GET", "/api/audit?limit=100")[2]
         login = next(r for r in rows if r["action"] == "login" and r["user"] == "admin")
@@ -149,6 +158,36 @@ class WebTest(unittest.TestCase):
         app.acct_fails.clear()
         app.fails.clear()
         self.assertEqual(self.req("POST", "/api/login", {"user": "u2", "password": pw}, cookie="")[0], 200)
+
+
+class RealIpTest(unittest.TestCase):
+    """Web sau reverse proxy: IP that lay tu X-Forwarded-For, khong de nguoi dung gia mao."""
+
+    def H(self, *xff, real=None):
+        import email.message
+        m = email.message.Message()
+        for x in xff:
+            m["X-Forwarded-For"] = x
+        if real:
+            m["X-Real-IP"] = real
+        return m
+
+    def test_rules(self):
+        from gw_controller import real_client_ip
+        cfg = {"trusted_proxies": ["127.0.0.1", "::1", "10.0.0.0/8"], "real_ip_header": "X-Forwarded-For"}
+        self.assertEqual(real_client_ip("127.0.0.1", self.H("1.2.3.4"), cfg), "1.2.3.4")
+        # nguoi dung tu gui "6.6.6.6" o dau chuoi -> bi bo qua, lay IP proxy noi them o cuoi
+        self.assertEqual(real_client_ip("127.0.0.1", self.H("6.6.6.6, 1.2.3.4"), cfg), "1.2.3.4")
+        # qua 2 proxy noi bo
+        self.assertEqual(real_client_ip("127.0.0.1", self.H("1.2.3.4, 10.1.1.1"), cfg), "1.2.3.4")
+        # ket noi thang (khong qua proxy) -> header bi bo qua
+        self.assertEqual(real_client_ip("8.8.8.8", self.H("1.2.3.4"), cfg), "8.8.8.8")
+        self.assertEqual(real_client_ip("127.0.0.1", self.H(), cfg), "127.0.0.1")
+        self.assertEqual(real_client_ip("127.0.0.1", self.H("rac"), cfg), "127.0.0.1")
+        self.assertEqual(real_client_ip("127.0.0.1", self.H("1.2.3.4:5555"), cfg), "1.2.3.4")
+        self.assertEqual(real_client_ip("127.0.0.1", self.H("[2001:db8::5]:443"), cfg), "2001:db8::5")
+        self.assertEqual(real_client_ip("127.0.0.1", self.H(real="5.5.5.5"), {**cfg, "real_ip_header": "X-Real-IP"}), "5.5.5.5")
+        self.assertEqual(real_client_ip("127.0.0.1", self.H("1.2.3.4"), {**cfg, "trusted_proxies": []}), "127.0.0.1")
 
 
 class AuditRotateTest(unittest.TestCase):

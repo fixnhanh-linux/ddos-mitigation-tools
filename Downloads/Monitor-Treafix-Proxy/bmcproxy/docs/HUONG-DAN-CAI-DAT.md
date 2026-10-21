@@ -1149,3 +1149,26 @@ Site → **Bảo trì** (vận hành / quản trị của site đó): chọn **c
 - Lịch **sắp tới** bấm **Huỷ** để xoá. Lịch **đang diễn ra** bấm **Kết thúc** để kết thúc ngay (giữ lại lịch sử).
 - Lịch đã xong được giữ 90 ngày. Mọi thêm / kết thúc đều ghi Nhật ký (`maint-add`, `maint-end`).
 - Agent nhận lịch qua lần đồng bộ (10 giây), không cần Áp dụng.
+
+## 31. Web chạy sau reverse proxy (nginx / Traefik): lấy IP thật
+
+Web để sau nginx / Traefik (vd `https://proxybb-admin.longvan.vn` → `127.0.0.1:9543`) thì mọi yêu cầu đến từ `127.0.0.1`. Web lấy **IP thật** của người dùng từ header proxy ghi vào. Nhật ký, lịch sử đăng nhập, chặn sai mật khẩu theo IP, IP agent đều dùng IP thật.
+
+`config.json` (mặc định đã đúng khi proxy chạy cùng máy):
+
+```json
+"trusted_proxies": ["127.0.0.1", "::1"],
+"real_ip_header": "X-Forwarded-For"
+```
+
+- Chỉ tin header khi yêu cầu đến **từ** địa chỉ trong `trusted_proxies` (IP hoặc dải, vd `10.0.0.0/8`). Người dùng kết nối thẳng thì header bị bỏ qua, không giả mạo được.
+- `X-Forwarded-For`: web lấy địa chỉ **ngoài cùng bên phải** không phải proxy tin cậy (phần bên trái do người dùng tự gửi được nên bỏ qua).
+- **nginx** phải có dòng này trong `location` chuyển tới web (Traefik tự thêm, không cần sửa):
+
+```nginx
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+```
+
+- nginx chỉ đặt `X-Real-IP $remote_addr` thì đổi `"real_ip_header": "X-Real-IP"`.
+- Proxy ở máy khác: thêm IP máy proxy vào `trusted_proxies`. Sửa xong `sudo systemctl restart bmcproxy`.
+- Agent đi qua proxy: danh sách **IP được phép** của site so với cả IP thật lẫn `127.0.0.1` (site cài từ trước vẫn chạy). Muốn chặt hơn: Sửa site → IP được phép chỉ để IP public của server site.
