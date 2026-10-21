@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Treafix Proxy BB</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+
+<!-- ============================== Đăng nhập ============================== -->
+<section id="login" class="login hidden">
+  <form id="login-form" class="login-card" method="post" action="#" autocomplete="on">
+    <div class="logo-row"><span class="logo">TP</span><div><h1>Treafix Proxy BB</h1><p>Truy cập BMC / IPMI qua Traefik · nhiều site</p></div></div>
+    <label>Tài khoản<input name="user" id="login-user" autocomplete="username" required></label>
+    <label>Mật khẩu<input name="password" id="login-password" type="password" autocomplete="current-password" required></label>
+    <label id="login-otp-row" class="hidden">Mã xác thực 2 lớp (6 số trên ứng dụng Authenticator)
+      <input name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456"></label>
+    <label class="check-line"><input type="checkbox" name="remember"> Ghi nhớ đăng nhập 30 ngày
+      <small class="help">Chỉ tick trên máy riêng của bạn.</small></label>
+    <p id="login-error" class="form-error"></p>
+    <button class="btn primary block" type="submit">Đăng nhập</button>
+    <p id="login-ad-hint" class="hint hidden"></p>
+  </form>
+</section>
+
+<!-- ============================== Ứng dụng ============================== -->
+<div id="app" class="shell hidden">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-brand">
+      <span class="logo">TP</span>
+      <span class="nav-lbl">Treafix Proxy BB</span>
+      <button id="btn-collapse" class="collapse-btn" type="button" title="Thu gọn menu (phím tắt: Ctrl+B)" aria-label="Thu gọn menu">
+        <svg class="ico-collapse" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+    </div>
+    <nav class="side-nav">
+      <div class="nav-group nav-lbl">Giám sát</div>
+      <a href="#overview" data-page="overview" title="Tổng quan" data-tip="Tổng quan">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg></span>
+        <span class="nav-lbl">Tổng quan</span><span class="count" id="nav-warn-count"></span>
+      </a>
+      <a href="#traefik" data-page="traefik" title="Traefik" data-tip="Traefik">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4m10 4v12m0 0l4-4m-4 4l-4-4"/></svg></span>
+        <span class="nav-lbl">Traefik</span>
+      </a>
+      <div class="nav-group nav-lbl">Quản lý</div>
+      <a href="#sites" data-page="sites" title="Site" data-tip="Site">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+        <span class="nav-lbl">Site</span><span class="count" id="nav-site-count"></span>
+      </a>
+      <a href="#bmcs" data-page="bmcs" title="BMC" data-tip="BMC">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></span>
+        <span class="nav-lbl">BMC</span><span class="count" id="nav-bmc-count"></span>
+      </a>
+      <a href="#templates" data-page="templates" title="Mẫu BMC" data-tip="Mẫu BMC">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></span>
+        <span class="nav-lbl">Mẫu BMC</span>
+      </a>
+      <div class="nav-group nav-lbl">Hệ thống</div>
+      <a href="#audit" data-page="audit" data-min-role="operator" title="Nhật ký" data-tip="Nhật ký">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+        <span class="nav-lbl">Nhật ký</span>
+      </a>
+      <a href="#backups" data-page="backups" data-min-role="admin" title="Sao lưu" data-tip="Sao lưu">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></span>
+        <span class="nav-lbl">Sao lưu</span>
+      </a>
+      <a href="#users" data-page="users" data-min-role="admin" title="Người dùng" data-tip="Người dùng">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+        <span class="nav-lbl">Người dùng</span>
+      </a>
+      <a href="#settings" data-page="settings" title="Cài đặt" data-tip="Cài đặt">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="nav-lbl">Cài đặt</span>
+      </a>
+    </nav>
+    <div class="side-foot">
+      <div class="who" id="who-block"><span class="avatar" id="avatar"></span><div class="nav-lbl"><div id="whoami"></div><div class="role" id="whorole"></div></div></div>
+      <button id="btn-logout" class="btn ghost small side-btn" title="Đăng xuất" data-tip="Đăng xuất">
+        <span class="ico"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+        <span class="nav-lbl">Đăng xuất</span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="page-head">
+      <button id="btn-menu" class="btn ghost icon-btn menu-btn" aria-label="Mở menu">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div>
+        <h1 id="page-title">Tổng quan</h1>
+        <p id="page-sub" class="sub"></p>
+      </div>
+      <div class="head-actions" id="head-actions"></div>
+    </header>
+
+    <!-- Tổng quan -->
+    <section class="page" id="page-overview">
+      <div class="kpis" id="kpis"></div>
+      <div class="site-strip" id="ov-sites"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><h2>Cảnh báo</h2><span class="hint" id="ov-warn-count"></span></div>
+          <div id="ov-warnings" class="list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>BMC mất kết nối</h2><a href="#bmcs" data-goto-filter="down" class="link">Xem tất cả</a></div>
+          <div id="ov-down" class="list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Bị chặn nhiều nhất</h2><span class="hint">từ lúc agent khởi động</span></div>
+          <div id="ov-denied" class="list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Hệ thống</h2></div>
+          <dl id="ov-system" class="kv"></dl>
+        </div>
+      </div>
+    </section>
+
+    <!-- Site -->
+    <section class="page hidden" id="page-sites">
+      <div class="site-grid" id="site-grid"></div>
+      <div id="site-empty" class="panel empty hidden">
+        <h3>Chưa có site nào</h3>
+        <p>Mỗi site là một server Traefik. Thêm site để lấy token cho agent.</p>
+        <p style="margin-top: 14px;"><button type="button" class="btn primary" id="btn-empty-add-site">+ Thêm site mới</button></p>
+      </div>
+    </section>
+
+    <!-- BMC -->
+    <section class="page hidden" id="page-bmcs">
+      <div class="toolbar">
+        <div class="search"><input id="search" type="search" placeholder="Tìm cổng, IP, ghi chú…"></div>
+        <select id="filter-site" aria-label="Lọc theo site"><option value="">Mọi site</option></select>
+        <select id="filter-tag" aria-label="Lọc theo nhãn"><option value="">Mọi nhãn</option></select>
+        <div class="chips" id="chips">
+          <button data-filter="" class="chip active">Tất cả</button>
+          <button data-filter="java" class="chip">Console Java</button>
+          <button data-filter="down" class="chip">Mất kết nối</button>
+          <button data-filter="noauth" class="chip">Chưa xác thực</button>
+          <button data-filter="changed" class="chip">Mới bật xác thực</button>
+          <button data-filter="legacy" class="chip">TLS cũ</button>
+          <button data-filter="disabled" class="chip">Đang tắt</button>
+          <button data-filter="expiring" class="chip">Hết hạn / sắp hết</button>
+        </div>
+      </div>
+      <div id="bulk-bar" class="bulk-bar hidden">
+        <span>Đã chọn <b id="bulk-count">0</b> BMC</span>
+        <button class="btn small" data-bulk="auth-on">Bật xác thực</button>
+        <button class="btn small" data-bulk="auth-off">Tắt xác thực web</button>
+        <button class="btn small" data-bulk="console-off">Tắt xác thực console</button>
+        <button class="btn small" data-bulk="disable">Tạm tắt</button>
+        <button class="btn small" data-bulk="enable">Bật lại</button>
+        <button class="btn small" data-bulk="template">Đổi mẫu…</button>
+        <button class="btn small" data-bulk="tags">Nhãn…</button>
+        <button class="btn small" data-bulk="expires">Hạn…</button>
+        <button class="btn small danger-ghost" data-bulk="delete">Xoá</button>
+        <span class="grow"></span>
+        <button class="btn small ghost" data-bulk="clear">Bỏ chọn</button>
+      </div>
+      <div class="panel flush">
+        <div class="table-wrap">
+          <table class="table" id="bmc-table">
+            <thead><tr>
+              <th class="w-check"><input type="checkbox" id="check-all" aria-label="Chọn tất cả BMC đang hiện"></th>
+              <th class="w-dot sortable" data-sort="health" title="Sắp xếp theo kết nối"></th><th class="sortable" data-sort="site">Site</th>
+              <th class="sortable" data-sort="port">Cổng</th><th>Link truy cập</th><th class="sortable" data-sort="upstream">BMC</th><th>Console</th>
+              <th>Bảo mật</th><th>Traefik</th><th class="sortable" data-sort="access">Lượt truy cập</th><th class="sortable" data-sort="note">Ghi chú / nhãn</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="bmc-empty" class="empty hidden">
+          <h3>Chưa có BMC nào</h3>
+          <p>Vào trang <a href="#sites">Site</a> → “Nhập từ nginx” để lấy danh sách BMC từ server, hoặc thêm từng BMC.</p>
+          <p style="margin-top: 14px;"><button type="button" class="btn primary" id="btn-empty-add-bmc">+ Thêm BMC mới</button></p>
+        </div>
+        <div id="bmc-nomatch" class="empty hidden"><p>Không có BMC khớp bộ lọc.</p></div>
+      </div>
+    </section>
+
+    <!-- Traefik -->
+    <section class="page hidden" id="page-traefik">
+      <div class="toolbar" id="traefik-toolbar">
+        <label class="site-select-label"><span>Site Traefik:</span> <select id="traefik-site" aria-label="Chọn site"></select></label>
+      </div>
+      <div id="traefik-body"></div>
+    </section>
+
+    <!-- Nhật ký -->
+    <section class="page hidden" id="page-audit">
+      <div class="toolbar"><select id="audit-site" aria-label="Lọc site"><option value="">Mọi site</option></select></div>
+      <div class="panel flush"><div class="table-wrap">
+        <table class="table"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>Site</th><th>Thao tác</th><th>Chi tiết</th></tr></thead>
+          <tbody id="audit-list"></tbody></table>
+      </div></div>
+    </section>
+
+    <!-- Sao lưu -->
+    <section class="page hidden" id="page-backups">
+      <div class="panel note">Bản sao lưu chứa danh sách BMC, site và cài đặt (không chứa tài khoản). Khôi phục xong cần bấm <b>Áp dụng</b> để đẩy xuống các server. Mỗi server còn tự sao lưu cấu hình Traefik trước khi áp dụng.</div>
+      <div class="panel flush"><div class="table-wrap">
+        <table class="table"><thead><tr><th>Thời điểm</th><th>Loại</th><th>BMC theo site</th><th></th></tr></thead>
+          <tbody id="backup-list"></tbody></table>
+      </div></div>
+    </section>
+
+    <!-- Người dùng -->
+    <section class="page hidden" id="page-users">
+      <div class="panel flush"><div class="table-wrap">
+        <table class="table"><thead><tr><th>Tài khoản</th><th>Vai trò</th><th>Phạm vi</th><th>Trạng thái</th>
+          <th>Đăng nhập cuối</th><th>Phiên</th><th></th></tr></thead>
+          <tbody id="user-list"></tbody></table>
+      </div></div>
+      <div class="panel note">
+        <b>Quản trị</b>: toàn quyền. <b>Vận hành</b>: thêm/sửa BMC và áp dụng cho các site được giao. <b>Chỉ xem</b>: chỉ xem các site được giao. Để trống phạm vi = mọi site.
+        <br><b>Khoá</b> tài khoản hoặc đặt <b>ngày hết hạn</b> để tạm ngưng quyền (vd tài khoản nhà thầu). Đặt lại mật khẩu thì người dùng phải đổi mật khẩu ở lần đăng nhập sau.
+        Mỗi người tự bật <b>xác thực 2 lớp</b> ở trang Cài đặt.
+      </div>
+    </section>
+
+    <!-- Cài đặt -->
+    <section class="page hidden" id="page-settings">
+      <form id="settings-form" class="panel">
+        <div class="panel-head"><h2>Cài đặt chung cho mọi site</h2><span class="hint" id="settings-ro"></span></div>
+        <div class="fields">
+          <label class="span-2">URL dịch vụ auth-token<input name="auth_url" required></label>
+          <label>Cache kết quả xác thực (giây)<input name="auth_cache_seconds" type="number" min="0" max="86400"></label>
+          <label>Timeout gọi auth-token (giây)<input name="auth_timeout" type="number" min="1" max="60"></label>
+          <label class="switch span-2"><input type="checkbox" name="auth_verify_tls"><span class="track"></span>
+            <span><b>Kiểm tra chứng chỉ của dịch vụ auth-token</b><small>nginx cũ không kiểm tra. Bật nếu dịch vụ có chứng chỉ hợp lệ.</small></span></label>
+          <label>File chứng chỉ (.cer) trên server<input name="cert_file" required></label>
+          <label>File khoá (.key) trên server<input name="key_file" required></label>
+          <label>Access log Traefik<input name="access_log" required></label>
+          <label>Mức log
+            <select name="log_level"><option>DEBUG</option><option>INFO</option><option>WARN</option><option>ERROR</option></select></label>
+          <label>Cảnh báo chứng chỉ trước (ngày)<input name="cert_warn_days" type="number" min="1" max="365"></label>
+        </div>
+        <div class="field-note">Từng site có thể ghi đè URL auth-token, đường dẫn chứng chỉ, log tại trang Site → Sửa.</div>
+        <div class="form-foot">
+          <p id="settings-msg" class="form-msg"></p>
+          <button class="btn primary" type="submit" data-admin-only>Lưu cài đặt</button>
+        </div>
+      </form>
+      <div class="grid-2">
+        <form id="password-form" class="panel">
+          <div class="panel-head"><h2>Đổi mật khẩu</h2></div>
+          <div class="fields one">
+            <label>Mật khẩu cũ<input name="old" type="password" autocomplete="current-password" required></label>
+            <label>Mật khẩu mới (≥ 10 ký tự)<input name="new" type="password" autocomplete="new-password" minlength="10" required></label>
+          </div>
+          <div class="form-foot"><p id="password-msg" class="form-msg"></p><button class="btn" type="submit">Đổi mật khẩu</button></div>
+        </form>
+        <div class="panel">
+          <div class="panel-head"><h2>Thông tin</h2></div>
+          <dl id="server-info" class="kv"></dl>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Xác thực 2 lớp (2FA)</h2><span id="twofa-state" class="tag"></span></div>
+          <p class="hint">Khi bật, đăng nhập cần thêm mã 6 số trên điện thoại (Google Authenticator, Microsoft Authenticator,
+            FreeOTP…). Mất điện thoại: nhờ quản trị viên tắt 2FA cho tài khoản của bạn.</p>
+          <div id="twofa-body" class="mt"></div>
+        </div>
+      </div>
+      <form id="ldap-form" class="panel hidden" data-admin-only autocomplete="off">
+        <div class="panel-head"><h2>Đăng nhập bằng tài khoản công ty (Active Directory / LDAP)</h2><span id="ldap-state" class="tag"></span></div>
+        <p class="hint">Bật lên thì nhân viên đăng nhập web bằng tài khoản Windows / AD. Vai trò lấy theo <b>nhóm AD</b>.
+          Tài khoản riêng của web (vd <code>admin</code>) vẫn đăng nhập được khi AD hỏng - nên giữ 1 tài khoản quản trị riêng để dự phòng.</p>
+        <p id="ldap-missing" class="form-msg error hidden">Server web chưa có thư viện ldap3. Chạy trên server web:
+          <code>sudo apt install -y python3-ldap3 &amp;&amp; sudo systemctl restart bmcproxy</code></p>
+        <div class="fields">
+          <label class="switch span-2"><input type="checkbox" name="enabled"><span class="track"></span>
+            <span><b>Bật đăng nhập AD / LDAP</b><small>Tắt = chỉ tài khoản riêng của web.</small></span></label>
+          <label>Loại máy chủ<select name="mode"><option value="ad">Active Directory (Windows)</option><option value="ldap">OpenLDAP / LDAP khác</option></select></label>
+          <label>Tên miền AD<input name="domain" placeholder="cty.local"><small class="help">Đăng nhập bằng <code>tên</code>, <code>CTY\tên</code> hoặc <code>tên@cty.local</code>.</small></label>
+          <label class="span-2">Máy chủ (nhiều máy cách nhau dấu cách, máy đầu trả lời được sẽ dùng)
+            <input name="servers" placeholder="ldaps://dc01.cty.local ldaps://dc02.cty.local"></label>
+          <label class="switch"><input type="checkbox" name="verify_tls"><span class="track"></span>
+            <span><b>Kiểm tra chứng chỉ máy chủ</b><small>Nên bật. CA nội bộ: nhập file CA bên cạnh.</small></span></label>
+          <label>File CA trên server web (không bắt buộc)<input name="ca_file" placeholder="/etc/bmcproxy/ad-ca.pem"></label>
+          <label class="switch"><input type="checkbox" name="starttls"><span class="track"></span>
+            <span><b>StartTLS</b><small>Chỉ khi dùng ldap:// (cổng 389). ldaps:// thì để tắt.</small></span></label>
+          <label>Base DN<input name="base_dn" placeholder="dc=cty,dc=local"><small class="help">AD để trống = tự lấy theo tên miền.</small></label>
+          <label>Tài khoản dịch vụ (bind DN, không bắt buộc)<input name="bind_dn" placeholder="CN=svc-bmcproxy,OU=Service,DC=cty,DC=local"></label>
+          <label>Mật khẩu tài khoản dịch vụ<input name="bind_password" type="password" autocomplete="new-password" placeholder="để trống = giữ mật khẩu đã lưu"></label>
+          <label>Bộ lọc tìm người dùng (để trống = mặc định)<input name="user_filter" placeholder="(&amp;(objectClass=user)(sAMAccountName={user}))"></label>
+          <label>Mẫu DN người dùng (LDAP, không có tài khoản dịch vụ)<input name="user_dn_template" placeholder="uid={user},ou=people,dc=cty,dc=local"></label>
+          <label>Nhóm AD → Quản trị<textarea name="group_admin" rows="2" placeholder="BMC-Admins"></textarea></label>
+          <label>Nhóm AD → Vận hành<textarea name="group_operator" rows="2" placeholder="NOC, NOC-HCM, NOC-HN"></textarea></label>
+          <label>Nhóm AD → Chỉ xem<textarea name="group_viewer" rows="2" placeholder="Ke-Toan, Sales"></textarea></label>
+          <label>Nhóm AD → site (mỗi dòng 1 nhóm)<textarea name="site_groups" rows="2" placeholder="NOC-HCM = hcm&#10;NOC-HN = hn"></textarea>
+            <small class="help">Không thuộc nhóm nào ở đây = mọi site.</small></label>
+          <label>Không thuộc nhóm nào<select name="default_role"><option value="">Từ chối (khuyến nghị)</option>
+            <option value="viewer">Cho vào, vai trò Chỉ xem</option><option value="operator">Cho vào, vai trò Vận hành</option></select></label>
+          <label class="switch"><input type="checkbox" name="nested"><span class="track"></span>
+            <span><b>Tính cả nhóm lồng nhau (AD)</b><small>Thuộc nhóm con của BMC-Admins cũng là quản trị.</small></span></label>
+          <label>Timeout (giây)<input name="timeout" type="number" min="1" max="30"></label>
+        </div>
+        <div class="field-note">Tên nhóm: ghi tên (CN) như <code>BMC-Admins</code> cách nhau dấu phẩy, hoặc DN đầy đủ mỗi dòng 1 nhóm.
+          Mỗi lần đăng nhập, vai trò được cập nhật lại theo nhóm AD. Người không thuộc nhóm nào nhưng quản trị đã tạo sẵn
+          (Người dùng → Thêm → loại AD) thì dùng vai trò đặt trên web.</div>
+        <div class="fields ldap-test">
+          <label>Thử đăng nhập: tài khoản AD<input name="test_user" autocomplete="off" placeholder="khai.tq"></label>
+          <label>Mật khẩu<input name="test_password" type="password" autocomplete="new-password"></label>
+        </div>
+        <div id="ldap-result" class="mt"></div>
+        <div class="form-foot">
+          <p id="ldap-msg" class="form-msg"></p>
+          <button class="btn" type="button" id="btn-ldap-test">Kiểm tra / thử đăng nhập</button>
+          <button class="btn primary" type="submit">Lưu cài đặt AD</button>
+        </div>
+      </form>
+    </section>
+
+    <div id="pending-bar" class="pending-bar hidden">
+      <span class="pulse"></span>
+      <span id="pending-text"></span>
+      <button id="btn-review" class="btn primary">Xem &amp; áp dụng</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== Ngăn sửa BMC ============================== -->
+<div id="drawer-backdrop" class="backdrop hidden"></div>
+<aside id="drawer" class="drawer" aria-hidden="true">
+  <form id="bmc-form" class="drawer-inner" novalidate>
+    <header class="drawer-head">
+      <div><h2 id="drawer-title">Thêm BMC</h2><p id="drawer-sub" class="sub"></p></div>
+      <span class="drawer-tools">
+        <button type="button" class="btn ghost icon-btn" id="btn-drawer-wide" title="Mở rộng" aria-label="Mở rộng khung">⤢</button>
+        <button type="button" class="btn ghost icon-btn" data-close-drawer aria-label="Đóng">✕</button></span>
+    </header>
+    <div class="drawer-body">
+      <fieldset>
+        <legend>Kết nối</legend>
+        <div class="fields">
+          <label>Site (server Traefik)<select name="site"></select></label>
+          <label>Cổng trên proxy
+            <span class="input-row"><input name="port" type="number" min="1" max="65535" required>
+              <button type="button" class="btn small" id="btn-free-port" title="Gợi ý cổng còn trống của site">Gợi ý</button></span></label>
+          <div class="span-2 tpl-box">
+            <div class="tpl-head"><b>① Điền nhanh theo loại máy</b> <span class="help">(không bắt buộc)</span></div>
+            <div class="fields">
+              <label>Loại máy (mẫu)<select name="template"><option value="">— không dùng mẫu —</option></select></label>
+              <label>IP của BMC<input name="tpl_ip" placeholder="10.3.7.147" inputmode="decimal"></label>
+            </div>
+            <span class="help">Chọn loại máy + gõ IP → <b>tự điền ô ② Địa chỉ BMC</b> và các tuỳ chọn (console, TLS cũ, .jsesp…) theo loại máy.
+              Ô IP này chỉ để điền nhanh, không được lưu riêng.</span>
+            <button type="button" class="btn small" id="btn-apply-tpl" title="Điền lại theo mẫu (ghi đè các tuỳ chọn)">Điền lại</button>
+          </div>
+          <label class="span-2"><span><b>② Địa chỉ BMC</b> <span class="help">- proxy chuyển truy cập tới địa chỉ này (được lưu)</span></span>
+            <input name="upstream" placeholder="https://10.3.7.147:8005" required></label>
+          <label class="span-2">Ghi chú<input name="note" maxlength="200" placeholder="mã khách hàng, loại máy…"></label>
+          <label>Nhãn (cách nhau bởi dấu phẩy)<input name="tags" maxlength="300" placeholder="vd KH-ABC, tủ A3, R640" list="tag-list"></label>
+          <label>Hạn sử dụng<input name="expires" type="date">
+            <small class="help">Tới hạn: cảnh báo, rồi tự tắt BMC ở lần Áp dụng sau. Trống = không hạn.</small></label>
+          <datalist id="tag-list"></datalist>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Console (KVM)</legend>
+        <div class="fields">
+          <label>Cổng console<input name="console_port" type="number" min="1" max="65535" placeholder="không có"></label>
+          <label>Địa chỉ console<input name="console_upstream" placeholder="tự điền theo IP BMC"></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Console Java (JNLP / TCP)</legend>
+        <label class="switch"><input type="checkbox" name="java_web"><span class="track"></span>
+          <span><b>Mở console Java ngay trên web</b><small>Bấm "Launch Java Console" trên trang BMC sẽ mở luôn màn hình trong trình duyệt,
+            không tải file .jnlp, máy người dùng không cần cài Java. Server proxy cần Docker + image <code>bmcgw-kvm</code>
+            (<code>sudo bash install.sh kvm</code>). Không cần khai cổng TCP bên dưới.
+            Mỗi lần Launch có mật khẩu VNC riêng, chỉ trình duyệt đã bấm Launch vào được.</small></span></label>
+        <p class="help">Cho BMC chỉ có console Java (QCT/AMI JViewer, iDRAC 6/7, iLO 4…). Traefik chuyển thẳng TCP xuống BMC,
+          agent tự sửa file <code>.jnlp</code> để Java kết nối về tên miền proxy.</p>
+        <div class="fields">
+          <label class="span-2">Cổng TCP (cổng proxy:cổng BMC)
+            <span class="input-row"><input name="tcp_ports" placeholder="vd 17578:7578, 15120:5120, 15123:5123">
+              <button type="button" class="btn small" id="btn-java-ports" title="Lấy cổng Java của mẫu + gợi ý cổng proxy trống">Gợi ý</button></span>
+            <small class="help">Để trống nếu BMC dùng console HTML5. Nhớ mở firewall các cổng proxy này.</small></label>
+          <label class="span-2">IP được dùng console Java
+            <input name="tcp_allow_ips" placeholder="vd 113.161.1.2, 10.10.0.0/24 (để trống = mọi IP, không an toàn)">
+            <small class="help">Java không gửi cookie đăng nhập portal, nên cổng TCP chỉ được bảo vệ bằng danh sách IP.</small></label>
+        </div>
+        <label class="switch"><input type="checkbox" name="jnlp_rewrite"><span class="track"></span>
+          <span><b>Tự sửa file .jnlp</b><small>Thay IP nội bộ + cổng BMC trong file tải về bằng tên miền + cổng proxy.</small></span></label>
+        <div class="fields mt">
+          <label class="span-2">Đường dẫn file console Java (.jnlp)
+            <span class="input-row">
+              <input name="jnlp_path" placeholder="vd viewer.jnlp hoặc Java/jviewer.jnlp?EXTRNIP={host}&amp;JNLPSTR=JViewer">
+              <select id="sel-jnlp-preset" style="max-width:210px;" aria-label="Chọn mẫu file jnlp">
+                <option value="">-- Chọn nhanh --</option>
+                <option value="viewer.jnlp">Dell iDRAC / Cisco / Lenovo (viewer.jnlp)</option>
+                <option value="Java/jviewer.jnlp?EXTRNIP={host}&amp;JNLPSTR=JViewer">QCT / AMI MegaRAC (jviewer.jnlp)</option>
+                <option value="cgi/url_redirect.cgi?url_name=man_ikvm&amp;url_type=jwsk">Supermicro iKVM (jwsk)</option>
+              </select>
+            </span>
+            <small class="help">Đường dẫn file <code>.jnlp</code> để mở nhanh console hoặc mở trên web (để trống sẽ tự nhận theo mẫu máy).</small>
+          </label>
+        </div>
+        <div id="drawer-java-quick" class="hidden mt" style="padding:10px 12px;background:var(--panel-2);border-radius:8px;border:1px solid var(--line);align-items:center;gap:10px;"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Bảo mật</legend>
+        <label class="switch"><input type="checkbox" name="auth"><span class="track"></span>
+          <span><b>Bắt xác thực cổng web</b><small>Người dùng phải có cookie đăng nhập portal hợp lệ.</small></span></label>
+        <label class="switch"><input type="checkbox" name="console_auth"><span class="track"></span>
+          <span><b>Bắt xác thực console</b><small>Tắt nếu BMC dùng trình xem Java / ứng dụng ngoài (không có cookie).</small></span></label>
+        <label class="mt">Target bắt buộc
+          <input name="expected_target" placeholder="để trống nếu không kiểm tra">
+          <small class="help">Token phải có trường <code>target</code> đúng giá trị này mới được vào BMC.</small></label>
+      </fieldset>
+      <fieldset>
+        <legend>Nâng cao</legend>
+        <label class="switch"><input type="checkbox" name="legacy_tls"><span class="track"></span>
+          <span><b>BMC đời cũ</b><small>Cho phép TLS 1.0 và cipher RSA/CBC. BMC chỉ hỗ trợ DHE vẫn không kết nối được.</small></span></label>
+        <label class="switch"><input type="checkbox" name="jsesp_cache"><span class="track"></span>
+          <span><b>Cache file .jsesp</b><small>Cho BMC AMI MegaRAC / Supermicro.</small></span></label>
+        <label class="switch"><input type="checkbox" name="enabled"><span class="track"></span>
+          <span><b>Đang hoạt động</b><small>Tắt để gỡ BMC khỏi Traefik mà vẫn giữ cấu hình.</small></span></label>
+        <label class="mt">Host header gửi tới BMC
+          <select name="host_header">
+            <option value="client">Tên miền proxy (mặc định)</option>
+            <option value="upstream">Địa chỉ IP của BMC</option>
+          </select></label>
+        <label class="mt">Số kết nối tối đa tới BMC
+          <input name="max_conns" type="number" min="0" max="32" placeholder="0 = không giới hạn">
+          <small class="help">BMC yếu (QCT / AMI) để <b>4</b>: proxy xếp hàng request thay vì dồn vào làm treo / 502 web IPMI.
+            0 = không giới hạn.</small></label>
+      </fieldset>
+      <div id="drawer-links" class="drawer-links hidden"></div>
+      <details id="preview-wrap" class="preview">
+        <summary>Xem trước cấu hình Traefik</summary>
+        <pre id="preview" class="code"></pre>
+      </details>
+      <p id="bmc-form-error" class="form-error"></p>
+    </div>
+    <footer class="drawer-foot">
+      <button type="button" id="btn-delete" class="btn danger-ghost">Xoá BMC</button>
+      <button type="button" id="btn-bmc-check" class="btn ghost" title="Ping / thử cổng / thử TLS BMC này từ server site">Kiểm tra</button>
+      <button type="button" id="btn-bmc-history" class="btn ghost">Lịch sử</button>
+      <button type="button" id="btn-bmc-clone" class="btn ghost" title="Tạo BMC mới cùng cấu hình">Nhân bản</button>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" data-close-drawer>Huỷ</button>
+      <button type="submit" class="btn primary" id="btn-save-bmc">Lưu</button>
+    </footer>
+  </form>
+</aside>
+
+<!-- ============================== Hộp thoại ============================== -->
+<dialog id="dlg-plan" class="modal wide">
+  <header class="modal-head"><h2>Áp dụng thay đổi</h2>
+    <button type="button" class="btn ghost icon-btn" data-close-dialog aria-label="Đóng">✕</button></header>
+  <div class="modal-body"><div id="plan-sites"></div></div>
+  <footer class="modal-foot">
+    <span class="hint">Mỗi server tự sao lưu → ghi config → kiểm tra Traefik. Lỗi tự khôi phục, không ảnh hưởng site khác.</span>
+    <span class="grow"></span>
+    <button type="button" class="btn ghost" data-close-dialog>Đóng</button>
+    <button type="button" id="btn-apply" class="btn primary">Áp dụng site đã chọn</button>
+  </footer>
+</dialog>
+
+<dialog id="dlg-form" class="modal">
+  <form id="gen-form" novalidate>
+    <header class="modal-head"><h2 id="gen-title"></h2>
+      <button type="button" class="btn ghost icon-btn" data-close-dialog aria-label="Đóng">✕</button></header>
+    <div class="modal-body" id="gen-body"></div>
+    <footer class="modal-foot">
+      <p id="gen-error" class="form-error grow"></p>
+      <button type="button" class="btn ghost" data-close-dialog>Huỷ</button>
+      <button type="submit" class="btn primary" id="gen-ok">Lưu</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="dlg-info" class="modal wide">
+  <header class="modal-head"><h2 id="info-title"></h2>
+    <button type="button" class="btn ghost icon-btn" data-close-dialog aria-label="Đóng">✕</button></header>
+  <div class="modal-body" id="info-body"></div>
+  <footer class="modal-foot"><span class="grow"></span><button type="button" class="btn primary" data-close-dialog>Đóng</button></footer>
+</dialog>
+
+<dialog id="dlg-confirm" class="modal">
+  <header class="modal-head"><h2 id="confirm-title"></h2></header>
+  <div class="modal-body"><p id="confirm-text"></p></div>
+  <footer class="modal-foot"><span class="grow"></span>
+    <button type="button" class="btn ghost" data-close-dialog>Huỷ</button>
+    <button type="button" id="confirm-ok" class="btn danger">Đồng ý</button></footer>
+</dialog>
+
+<dialog id="dlg-bulk" class="modal wide">
+  <header class="modal-head"><h2>Thêm / cập nhật BMC hàng loạt</h2>
+    <button type="button" class="btn ghost icon-btn" data-close-dialog aria-label="Đóng">✕</button></header>
+  <div class="modal-body">
+    <p class="hint">Mỗi dòng 1 BMC, các site khác nhau dùng chung 1 lần. Dán từ Excel (cột cách nhau bằng Tab) hoặc CSV.
+      Thứ tự cột: <code>site, cổng, ip, cổng console, mẫu, ghi chú</code>. Hoặc dán nguyên file đã <b>Xuất CSV</b> (có dòng tiêu đề) để sửa hàng loạt.</p>
+    <textarea id="bulk-text" class="code-input" rows="10" spellcheck="false"></textarea>
+    <div class="row-gap mt">
+      <label class="check-inline"><input type="checkbox" id="bulk-update"> Cập nhật BMC đã có (cùng site + cổng)</label>
+      <span class="grow"></span>
+      <button type="button" class="btn" id="btn-bulk-example">Chèn ví dụ</button>
+      <button type="button" class="btn" id="btn-bulk-check">Kiểm tra</button>
+    </div>
+    <div id="bulk-result" class="mt"></div>
+  </div>
+  <footer class="modal-foot">
+    <span class="hint" id="bulk-summary"></span><span class="grow"></span>
+    <button type="button" class="btn ghost" data-close-dialog>Đóng</button>
+    <button type="button" class="btn primary" id="btn-bulk-save" disabled>Lưu tất cả</button>
+  </footer>
+</dialog>
+
+<dialog id="dlg-templates" class="modal wide">
+  <header class="modal-head"><h2>Mẫu BMC theo loại máy</h2>
+    <button type="button" class="btn ghost icon-btn" data-close-dialog aria-label="Đóng">✕</button></header>
+  <div class="modal-body">
+    <p class="hint">Mẫu dùng chung cho mọi site. Mẫu có sẵn lấy theo các file mẫu nginx đang dùng; quản trị viên có thể thêm mẫu riêng.</p>
+    <div class="table-wrap"><table class="table"><thead><tr><th>Mã</th><th>Loại máy</th><th>Địa chỉ BMC</th><th>Console</th><th>Tuỳ chọn</th><th>Đang dùng</th><th></th></tr></thead>
+      <tbody id="tpl-list"></tbody></table></div>
+  </div>
+  <footer class="modal-foot"><span class="grow"></span>
+    <button type="button" class="btn" id="btn-tpl-add" data-admin-only>+ Thêm mẫu</button>
+    <button type="button" class="btn primary" data-close-dialog>Đóng</button></footer>
+</dialog>
+
+<div id="toasts" class="toasts"></div>
+</body>
+</html>

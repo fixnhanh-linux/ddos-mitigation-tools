@@ -1,0 +1,17 @@
+[Unit]
+Description=Treafix Proxy BB - agent (dong bo cau hinh Traefik + forwardAuth)
+After=network-online.target
+Before=traefik.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bmcproxy
+ExecStart=/usr/bin/python3 /opt/bmcproxy/bmcproxy.py agent -c /opt/bmcproxy/agent.json
+Restart=always
+RestartSec=3
+# Can root de ghi /etc/traefik, doi ten file nginx cu va restart Traefik / reload nginx
+User=root
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

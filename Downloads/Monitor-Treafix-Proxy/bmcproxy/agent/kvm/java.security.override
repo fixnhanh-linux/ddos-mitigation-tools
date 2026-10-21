@@ -1,0 +1,5 @@
+# BMC doi cu chi co TLS 1.0 / chung chi MD5-SHA1 / jar ky bang thuat toan cu -> bo chan cua Java 8
+jdk.tls.disabledAlgorithms=
+jdk.certpath.disabledAlgorithms=
+jdk.jar.disabledAlgorithms=
+jdk.tls.legacyAlgorithms=

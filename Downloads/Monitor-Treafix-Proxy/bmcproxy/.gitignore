@@ -1,0 +1,9 @@
+config.json
+agent.json
+data/
+agent-data/
+backups/
+__pycache__/
+dist/
+controller/agent-package/
+*.pyc

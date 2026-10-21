@@ -1,0 +1,1913 @@
+"""Controller: giao dien web + API quan ly BMC cua nhieu site, va API cho agent.
+
+Controller KHONG ghi config Traefik. No giu 'ban mong muon' cua tung site; khi bam Ap dung,
+no phat hanh mot release. Agent cua site do keo release ve, ap dung, bao ket qua.
+"""
+
+import datetime as dt
+import difflib
+import hmac
+import http.server
+import json
+import os
+import re
+import secrets
+import shutil
+import socket
+import ssl
+import sys
+import threading
+import time
+import traceback
+import urllib.parse
+
+import gw_ldap
+from gw_auth import ThreadingServer
+from gw_common import (BMC_DEFAULTS, bmc_ports, parse_tcp_ports, DASHBOARD_DEFAULTS, OVERRIDABLE, apr1_hash, validate_dashboard, RE_DOMAIN, RE_IP, RE_SITE_KEY, RE_USER, ROLES,
+                       SETTINGS_DEFAULTS, VERSION, ValidationError, cert_info, check_password, totp_check, totp_new_secret, totp_uri,
+                       clean_text, hash_password, hash_token, now_iso, read_json, to_port,
+                       validate_bmc_fields, validate_settings_values, write_json)
+from gw_templates import (BUILTIN_TEMPLATES, all_templates, apply_template, export_csv, parse_rows,
+                          row_to_bmc, validate_template)
+from gw_render import DEFAULT_PARAMS, release_rev, render_bmc, render_files
+
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+# Goi agent de lenh cai 1 dong tai ve (install.sh web chep vao day)
+AGENT_PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-package")
+INSTALL_TTL = 3600          # ma cai agent het han sau 1 gio
+INSTALL_PKG_WINDOW = 900    # sau khi dung ma: 15 phut de tai goi
+INSTALL_SCRIPT = '#!/usr/bin/env bash\n# Treafix Proxy BB - cai agent cho site __SITE__ (tao boi web luc __NOW__). Ma cai chi dung 1 lan.\nset -euo pipefail\nWEB="__WEB__"\nCODE="__CODE__"\nsay() { printf \'\\n\\033[1;36m==> %s\\033[0m\\n\' "$*"; }\ndie() { printf \'\\n\\033[1;31mLOI: %s\\033[0m\\n\' "$*" >&2; exit 1; }\n[ "$(id -u)" = 0 ] || die "Chạy bằng root: curl -fsSk $WEB/install/... | sudo bash"\ncommand -v python3 >/dev/null || die "Thiếu python3 (Ubuntu 22.04 có sẵn)"\ncommand -v curl >/dev/null || die "Thiếu curl: apt install -y curl"\n\nsay "Tải gói agent từ web"\ncd /home\ncurl -fsSk --max-time 120 -o bmc-gateway-agent.zip "$WEB/install/$CODE/agent.zip" \\\n  || die "Không tải được gói agent (mã cài hết hạn? - tạo lệnh mới trên web: Site → Cài agent)"\nrm -rf /home/bmc-gateway-agent\npython3 -m zipfile -e bmc-gateway-agent.zip /home\n[ -f /home/bmc-gateway-agent/install.sh ] || die "Gói agent không đúng"\n\nsay "Ghi /root/agent.json (site __SITE__, token mới)"\n( umask 077; cat > /root/agent.json <<\'JSON\'\n__AGENT_JSON__\nJSON\n)\nif curl -fs -o /dev/null --max-time 8 "$WEB/"; then VERIFY=true; else VERIFY=false; fi\npython3 - /root/agent.json "$VERIFY" <<\'PY\'\nimport json, sys\np, v = sys.argv[1], sys.argv[2] == "true"\nc = json.load(open(p)); c["verify_tls"] = v\njson.dump(c, open(p, "w"), indent=1)\nprint("    OK verify_tls =", v, "(web dùng chứng chỉ tự ký)" if not v else "")\nPY\n\nsay "Cài Traefik + agent"\nFORCE_AGENT_JSON=1 AGENT_JSON=/root/agent.json bash /home/bmc-gateway-agent/install.sh agent || {\n  echo\n  echo "Cài chưa xong. Sửa lỗi ở trên (vd thiếu chứng chỉ: CERT=/duong/dan.cer KEY=/duong/dan.key) rồi chạy lại:"\n  echo "    sudo FORCE_AGENT_JSON=1 bash /home/bmc-gateway-agent/install.sh agent"\n  exit 1\n}\necho\necho "Xong. Trên web, site __SITE__ chuyển chấm xanh trong ~10 giây."\necho "Tuỳ chọn - console Java trên web:  sudo bash /home/bmc-gateway-agent/install.sh kvm"\n'
+SESSION_TTL = 12 * 3600          # phien thuong (cookie mat khi dong trinh duyet)
+REMEMBER_TTL = 30 * 24 * 3600   # "Ghi nho dang nhap"
+MAX_BACKUPS = 50
+
+CONTROLLER_DEFAULTS = {
+    "listen_host": "0.0.0.0",
+    "listen_port": 9443,
+    "tls_cert": "",
+    "tls_key": "",
+    "data_dir": "data",
+    "backup_dir": "backups",
+    "zabbix_token": "",
+    "agent_offline_after": 45,
+    # Link web bi mat, vd "/k7Qm2xP9aB": "/" va "/api/" tra 404, chi "/<chuoi>/" vao duoc giao dien.
+    # Agent (/agent/v1/), lenh cai agent (/install/) va /api/zabbix van o goc.
+    "web_path": "",
+    # Luu du lieu vao MySQL (tuy chon). Trong = file JSON trong data_dir. Xem gw_db.py
+    "db": {},
+}
+
+STATIC = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+    "/app.css": ("app.css", "text/css; charset=utf-8"),
+}
+BMC_META = ("imported_from", "imported_auth", "imported_console_auth", "template", "updated_at", "updated_by",
+            "tags", "expires")
+
+
+def bmc_expired(b, today=None):
+    exp = b.get("expires") or ""
+    return bool(exp) and exp < (today or dt.date.today().isoformat())
+
+
+def parse_tags(v):
+    if isinstance(v, str):
+        v = re.split(r"[,;]+", v)
+    out = []
+    for t in v or []:
+        t = clean_text(str(t), 32).strip()
+        if t and t.lower() not in (x.lower() for x in out):
+            out.append(t)
+    if len(out) > 12:
+        raise ValidationError("Tối đa 12 nhãn cho mỗi BMC")
+    return out
+
+
+def load_controller_config(path):
+    cfg = {**CONTROLLER_DEFAULTS, **read_json(path, {})}
+    wp = str(cfg.get("web_path") or "").strip()
+    if wp and not re.fullmatch(r"/[A-Za-z0-9_-]{6,64}/?", wp):
+        sys.exit("config.json: web_path phải dạng /chuoi-ngau-nhien (6-64 ký tự chữ, số, - _)")
+    cfg["web_path"] = wp.rstrip("/")
+    base = os.path.dirname(os.path.abspath(path))
+    for k in ("data_dir", "backup_dir"):
+        if not os.path.isabs(cfg[k]):
+            cfg[k] = os.path.join(base, cfg[k])
+    os.makedirs(cfg["backup_dir"], exist_ok=True)
+    os.makedirs(os.path.join(cfg["data_dir"], "releases"), exist_ok=True)
+    return cfg
+
+
+def bmc_key(b):
+    return (b["site"], b["port"])
+
+
+def _diff(old, new, a, b):
+    return "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), a, b))
+
+
+# =========================================================================== #
+# Du lieu
+# =========================================================================== #
+
+class Store:
+    FILES = ("bmc.json", "settings.json", "sites.json", "users.json", "state.json", "templates.json", "auth.json")
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.dir = cfg["data_dir"]
+        self.lock = threading.RLock()
+        self.mtimes = {}
+        self.db = None
+        self.db_versions = None
+        self.db_error = ""
+        if (cfg.get("db") or {}).get("type"):
+            from gw_db import DocDB
+            self.db = DocDB(cfg["db"])
+            self.db.init_schema()
+            self._import_json_to_db()
+        self.refresh()
+        self.migrate()
+
+    # ------------------------------------------------------------ MySQL
+    def _import_json_to_db(self):
+        """Lan dau bat MySQL: chuyen file JSON + audit.log hien co len DB (chi khi DB con trong)."""
+        if self.db.versions():
+            return
+        n = 0
+        for name in self.FILES:
+            if os.path.isfile(self._p(name)):
+                self.db.save(name, read_json(self._p(name), {}))
+                n += 1
+        a = 0
+        try:
+            with open(self._p("audit.log"), encoding="utf-8") as f:
+                for ln in f.readlines()[-20000:]:
+                    try:
+                        self.db.audit_add(json.loads(ln))
+                        a += 1
+                    except (ValueError, KeyError):
+                        pass
+        except FileNotFoundError:
+            pass
+        if n or a:
+            print(f"đã chuyển {n} file dữ liệu + {a} dòng nhật ký từ JSON sang {self.db.describe()}", flush=True)
+
+    def _apply_docs(self, docs):
+        self.bmcs = docs.get("bmc.json", {"bmcs": []}).get("bmcs", [])
+        raw_settings = docs.get("settings.json", {})
+        self.settings = {**SETTINGS_DEFAULTS,
+                         **{k: v for k, v in raw_settings.items() if k in SETTINGS_DEFAULTS}}
+        self._legacy_sites = raw_settings.get("sites")
+        self.sites = docs.get("sites.json", {})
+        self.users = docs.get("users.json", {})
+        self.state = docs.get("state.json", {})
+        self.templates = docs.get("templates.json", {})
+        self.auth = docs.get("auth.json", {})  # dang nhap AD / LDAP (rieng, khong anh huong ban cau hinh site)
+
+    def _p(self, *name):
+        return os.path.join(self.dir, *name)
+
+    def _mtime(self, name):
+        try:
+            return os.stat(self._p(name)).st_mtime_ns
+        except OSError:
+            return None
+
+    def refresh(self):
+        if self.db:
+            return self._refresh_db()
+        with self.lock:
+            cur = {n: self._mtime(n) for n in self.FILES}
+            if cur == self.mtimes:
+                return
+            self.bmcs = read_json(self._p("bmc.json"), {"bmcs": []}).get("bmcs", [])
+            raw_settings = read_json(self._p("settings.json"), {})
+            self.settings = {**SETTINGS_DEFAULTS,
+                             **{k: v for k, v in raw_settings.items() if k in SETTINGS_DEFAULTS}}
+            self._legacy_sites = raw_settings.get("sites")
+            self.sites = read_json(self._p("sites.json"), {})
+            self.users = read_json(self._p("users.json"), {})
+            self.state = read_json(self._p("state.json"), {})
+            self.templates = read_json(self._p("templates.json"), {})
+            self.auth = read_json(self._p("auth.json"), {})
+            self.mtimes = cur
+
+    def _refresh_db(self):
+        with self.lock:
+            try:
+                vers = self.db.versions()
+                if vers == self.db_versions:
+                    self.db_error = ""
+                    return
+                rows = self.db.load_all()
+                self._apply_docs({k: v[0] for k, v in rows.items()})
+                self.db_versions = {k: v[1] for k, v in rows.items()}
+                self.db_error = ""
+                for name, (obj, _) in rows.items():  # ban sao JSON cho Sao luu / du phong
+                    if name in self.FILES:
+                        write_json(self._p(name), obj, 0o600 if name in ("users.json", "sites.json", "auth.json") else 0o644)
+            except Exception as e:  # mat MySQL: dung du lieu dang co trong bo nho
+                self.db_error = f"{type(e).__name__}: {e}"
+                if not hasattr(self, "bmcs"):
+                    raise
+
+    def migrate(self):
+        """Chuyen du lieu ban 1 site (settings.sites, user khong co role) sang ban nhieu site."""
+        with self.lock:
+            changed = False
+            if isinstance(self._legacy_sites, dict) and not self.sites:
+                for k, domain in self._legacy_sites.items():
+                    self.sites[k] = new_site_record(k, k.upper(), domain)
+                self.save("sites.json")
+                self.save("settings.json")
+                changed = True
+            for u in self.users.values():
+                if "role" not in u:
+                    u["role"], u["sites"] = "admin", []
+                    changed = True
+            if changed:
+                self.save("users.json")
+
+    def save(self, name):
+        data = {"bmc.json": lambda: {"bmcs": sorted(self.bmcs, key=bmc_key)},
+                "settings.json": lambda: self.settings,
+                "sites.json": lambda: self.sites,
+                "users.json": lambda: self.users,
+                "state.json": lambda: self.state,
+                "templates.json": lambda: self.templates,
+                "auth.json": lambda: self.auth}[name]()
+        write_json(self._p(name), data, 0o600 if name in ("users.json", "sites.json", "auth.json") else 0o644)
+        self.mtimes[name] = self._mtime(name)
+        if self.db:
+            try:
+                ver = self.db.save(name, data)
+                if self.db_versions is not None:
+                    self.db_versions[name] = ver
+                self.db_error = ""
+            except Exception as e:
+                self.db_error = f"{type(e).__name__}: {e}"
+                raise ValidationError(f"Không ghi được MySQL ({self.db_error}). Dữ liệu đã lưu tạm vào file JSON.")
+
+    def audit(self, user, action, detail="", site=""):
+        rec = {"ts": now_iso(), "user": user, "action": action, "site": site, "detail": detail}
+        line = json.dumps(rec, ensure_ascii=False)
+        with self.lock, open(self._p("audit.log"), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        if self.db:
+            try:
+                self.db.audit_add(rec)
+            except Exception as e:
+                self.db_error = f"{type(e).__name__}: {e}"
+
+    def read_audit(self, limit=500):
+        if self.db:
+            try:
+                return self.db.audit_read(limit)
+            except Exception as e:
+                self.db_error = f"{type(e).__name__}: {e}"
+        try:
+            with open(self._p("audit.log"), encoding="utf-8") as f:
+                lines = f.readlines()[-limit:]
+        except FileNotFoundError:
+            return []
+        out = []
+        for ln in reversed(lines):
+            try:
+                out.append(json.loads(ln))
+            except ValueError:
+                pass
+        return out
+
+    # ------------------------------------------------------------ site
+    def site_settings(self, site):
+        return {**self.settings, **self.sites[site].get("overrides", {})}
+
+    def site_bmcs(self, site):
+        today = dt.date.today().isoformat()
+        out = []
+        for b in self.bmcs:
+            if b["site"] != site:
+                continue
+            r = {k: b[k] for k in BMC_DEFAULTS if k in b}
+            if r.get("tcp_ports") and not all(isinstance(t, dict) for t in r["tcp_ports"]):
+                try:  # du lieu cu / sua tay ([5900], ["6080:6080"]) -> dang chuan cho agent
+                    r["tcp_ports"] = parse_tcp_ports(r["tcp_ports"])
+                except ValidationError:
+                    r["tcp_ports"] = []
+            if bmc_expired(b, today):  # het han su dung -> tat o lan Ap dung sau
+                r["enabled"] = False
+            out.append(r)
+        return sorted(out, key=lambda b: b["port"])
+
+    def desired(self, site):
+        s = self.sites[site]
+        settings = self.site_settings(site)
+        bmcs = self.site_bmcs(site)
+        dash = {**DASHBOARD_DEFAULTS, **(s.get("dashboard") or {})}
+        rel = {"site": site, "domain": s["domain"], "settings": settings, "bmcs": bmcs,
+               "rev": release_rev(s["domain"], settings, bmcs, dash)}
+        if dash["enabled"]:
+            rel["dashboard"] = dash
+        return rel
+
+    def load_release(self, site, rev):
+        if not rev or not re.match(r"^[0-9a-f]{12}$", rev):
+            return None
+        return read_json(self._p("releases", site, f"{rev}.json"), None)
+
+    def get_bmc(self, site, port):
+        for b in self.bmcs:
+            if b["site"] == site and b["port"] == port:
+                return b
+        return None
+
+
+def new_site_record(key, label, domain):
+    return {"label": label, "domain": domain, "allowed_ips": [], "token_hash": "",
+            "token_hint": "", "overrides": {}, "created_at": now_iso()}
+
+
+# =========================================================================== #
+# Ung dung
+# =========================================================================== #
+
+class App:
+    def __init__(self, store):
+        self.store = store
+        self.hb = {}            # site -> heartbeat moi nhat (bo nho)
+        self.commands = {}      # site -> [lenh cho agent]
+        self.extra = {}         # site -> {"logs"|"diag"|"action": ket qua agent gui ve}
+        self.install_codes = {}  # hash(ma cai) -> {site, exp, by, used_at, ip}
+        # hash(ma phien) -> (user, het han, ip, luc tao, ghi nho). Luu ra data/sessions.json (chi ban bam)
+        self.sessions = self._load_sessions()
+        self.fails = {}
+        self.slock = threading.Lock()
+        self.started = now_iso()
+
+    # ------------------------------------------------------------ phien
+    def _sessions_path(self):
+        return self.store._p("sessions.json")
+
+    def _load_sessions(self):
+        now = time.time()
+        raw = read_json(os.path.join(self.store.dir, "sessions.json"), {})
+        return {h: tuple(v) for h, v in raw.items() if isinstance(v, list) and len(v) >= 5 and v[1] > now}
+
+    def _save_sessions(self):
+        """Goi khi da giu slock. Web khoi dong lai van con phien (nhat la phien Ghi nho)."""
+        now = time.time()
+        for h in [h for h, s in self.sessions.items() if s[1] < now]:
+            del self.sessions[h]
+        try:
+            write_json(self._sessions_path(), {h: list(s) for h, s in self.sessions.items()}, 0o600)
+        except OSError as e:
+            sys.stderr.write(f"không lưu được sessions.json: {e}\n")
+
+    def new_session(self, user, ip="", remember=False):
+        token = secrets.token_urlsafe(32)
+        with self.slock:
+            self.sessions[hash_token(token)] = (user, time.time() + (REMEMBER_TTL if remember else SESSION_TTL),
+                                                ip, now_iso(), bool(remember))
+            self._save_sessions()
+        return token
+
+    def user_sessions(self, name):
+        now = time.time()
+        with self.slock:
+            return [{"ip": s[2], "since": s[3], "remember": bool(s[4])} for s in self.sessions.values()
+                    if s[0] == name and s[1] > now]
+
+    @staticmethod
+    def blocked_reason(rec):
+        """Tai khoan bi khoa / het han -> ly do (chuoi), con dung duoc -> ""."""
+        if rec.get("disabled"):
+            return "Tài khoản đã bị khoá. Liên hệ quản trị viên."
+        exp = rec.get("expires") or ""
+        if exp and exp < dt.date.today().isoformat():
+            return f"Tài khoản đã hết hạn ({exp}). Liên hệ quản trị viên."
+        return ""
+
+    def session_user(self, token):
+        if not token:
+            return None
+        h = hash_token(token)
+        with self.slock:
+            s = self.sessions.get(h)
+            if not s:
+                return None
+            if s[1] < time.time():
+                del self.sessions[h]
+                self._save_sessions()
+                return None
+        rec = self.store.users.get(s[0])
+        if not rec or self.blocked_reason(rec):
+            return None
+        return s[0]
+
+    def drop_session(self, token):
+        with self.slock:
+            if token and self.sessions.pop(hash_token(token), None):
+                self._save_sessions()
+
+    def drop_user_sessions(self, name):
+        with self.slock:
+            for t in [t for t, s in self.sessions.items() if s[0] == name]:
+                del self.sessions[t]
+            self._save_sessions()
+
+    def login_allowed(self, ip):
+        with self.slock:
+            n, until = self.fails.get(ip, (0, 0))
+            return not (n >= 5 and until > time.time())
+
+    def login_failed(self, ip):
+        with self.slock:
+            n, _ = self.fails.get(ip, (0, 0))
+            self.fails[ip] = (n + 1, time.time() + 300)
+
+    def login_ok(self, ip):
+        with self.slock:
+            self.fails.pop(ip, None)
+
+    # ------------------------------------------------------------ quyen
+    def user(self, name):
+        u = self.store.users[name]
+        return {"name": name, "role": u.get("role", "viewer"), "sites": u.get("sites") or [],
+                "full_name": u.get("full_name", ""), "must_change": bool(u.get("must_change")),
+                "totp": bool(u.get("totp_secret")), "source": u.get("source", "local")}
+
+    @staticmethod
+    def can_view(u, site):
+        return u["role"] == "admin" or not u["sites"] or site in u["sites"]
+
+    def can_edit(self, u, site):
+        return u["role"] == "admin" or (u["role"] == "operator" and self.can_view(u, site))
+
+    def need_edit(self, u, site):
+        if not self.can_edit(u, site):
+            raise PermissionError(f"Bạn không có quyền sửa site {site}")
+
+    @staticmethod
+    def need_admin(u):
+        if u["role"] != "admin":
+            raise PermissionError("Chỉ quản trị viên được làm việc này")
+
+    def visible_sites(self, u):
+        return [k for k in sorted(self.store.sites) if self.can_view(u, k)]
+
+    # ------------------------------------------------------------ trang thai site
+    def online(self, site):
+        h = self.hb.get(site)
+        return bool(h) and time.time() - h["_received"] < self.store.cfg["agent_offline_after"]
+
+    def site_status(self, site):
+        st = self.store
+        s = st.sites[site]
+        state = st.state.get(site, {})
+        h = self.hb.get(site) or {}
+        desired = st.desired(site)
+        target = state.get("target") or {}
+        applied_rev = h.get("applied_rev") or (state.get("applied") or {}).get("rev")
+        report = state.get("last_report") or {}
+        reported = (report.get("rev"), report.get("attempt")) == (target.get("rev"), target.get("attempt"))
+        if not target or desired["rev"] != target.get("rev"):
+            phase = "pending" if (target or desired["bmcs"]) else "empty"
+        elif reported:
+            phase = "synced" if report.get("ok") else "failed"
+            if report.get("ok"):
+                applied_rev = target["rev"]
+        elif applied_rev == target.get("rev") and not report:
+            phase = "synced"
+        else:
+            phase = "applying"
+        if phase == "synced" and h.get("legacy_active"):
+            phase = "pending"
+        tr = h.get("traefik") or {}
+        routers = tr.get("routers") or []
+        return {
+            "key": site, "label": s["label"], "domain": s["domain"],
+            "allowed_ips": s.get("allowed_ips", []), "overrides": s.get("overrides", {}),
+            "token_set": bool(s.get("token_hash")), "token_hint": s.get("token_hint", ""),
+            "online": self.online(site), "last_seen": h.get("time"),
+            "hostname": h.get("hostname"), "agent_version": h.get("version"),
+            "remote_ip": h.get("_ip"),
+            "bmcs": len(desired["bmcs"]),
+            "enabled": sum(1 for b in desired["bmcs"] if b.get("enabled", True)),
+            "down": sum(1 for v in (h.get("health") or {}).values()
+                        if (v.get("web") or {}).get("up") is False),
+            "phase": phase, "desired_rev": desired["rev"], "target": target,
+            "applied_rev": applied_rev, "last_report": report,
+            "traefik": {"reachable": tr.get("reachable", False), "version": tr.get("version"),
+                        "entrypoints": tr.get("entrypoints"), "routers": len(routers),
+                        "errors": sum(1 for r in routers if r.get("status") != "enabled" or r.get("error"))},
+            "warnings": h.get("warnings") or [],
+            "legacy_active": len(h.get("legacy_active") or []),
+            "created_at": s.get("created_at"),
+            "dashboard": self.dashboard_view(site),
+            "sysinfo": h.get("sysinfo") or {},
+            "extra_at": {k: (v or {}).get("at") for k, v in (self.extra.get(site) or {}).items()},
+            "history_count": len((state.get("history") or [])),
+        }
+
+    def bmc_views(self, u):
+        out = []
+        for b in self.store.bmcs:
+            if not self.can_view(u, b["site"]):
+                continue
+            h = self.hb.get(b["site"]) or {}
+            routers = {r["name"]: r for r in (h.get("traefik") or {}).get("routers") or []}
+            v = {**BMC_DEFAULTS, **b}
+            v["health"] = (h.get("health") or {}).get(str(b["port"]))
+            v["auth_stats"] = (h.get("auth_stats") or {}).get(str(b["port"]))
+            names = [f"bmc-{b['port']}"] + ([f"bmc-{b['port']}-console"] if b.get("console_port") else [])
+            v["traefik"] = {n: routers[n] for n in names if n in routers}
+            v["site_online"] = self.online(b["site"])
+            v["traefik_reachable"] = bool((h.get("traefik") or {}).get("reachable"))
+            out.append(v)
+        return sorted(out, key=bmc_key)
+
+    def dashboard_view(self, site):
+        s = self.store.sites[site]
+        d = {**DASHBOARD_DEFAULTS, **(s.get("dashboard") or {})}
+        return {"enabled": d["enabled"], "port": d["port"], "allow_ips": d["allow_ips"],
+                "users": sorted(d["users"]),
+                "url": f"https://{s['domain']}:{d['port']}/dashboard/" if s.get("domain") else ""}
+
+    def update_dashboard(self, site, data):
+        """data: {enabled, port, allow_ips, user, password}. Mat khau de trong = giu nguyen."""
+        cur = {**DASHBOARD_DEFAULTS, **(self.store.sites[site].get("dashboard") or {})}
+        users = dict(cur["users"])
+        user = str(data.get("user") or "").strip()
+        pw = str(data.get("password") or "")
+        if user:
+            if pw:
+                if len(pw) < 10:
+                    raise ValidationError("Mật khẩu dashboard tối thiểu 10 ký tự")
+                users = {user: apr1_hash(pw)}
+            elif user in users:
+                users = {user: users[user]}
+            elif data.get("enabled"):
+                raise ValidationError("Nhập mật khẩu cho tài khoản dashboard mới")
+        d = validate_dashboard({"enabled": data.get("enabled", cur["enabled"]),
+                                "port": data.get("port", cur["port"]),
+                                "allow_ips": data.get("allow_ips", cur["allow_ips"]),
+                                "users": users})
+        if d["enabled"]:
+            for b in self.store.bmcs:
+                if b["site"] == site and d["port"] in (b["port"], b.get("console_port")):
+                    raise ValidationError(f"Cổng {d['port']} đang dùng cho BMC {b['port']}")
+            reserved = set((self.hb.get(site) or {}).get("reserved_ports") or [])
+            if d["port"] in reserved:
+                raise ValidationError(f"Cổng {d['port']} đang dành cho agent/Traefik")
+        self.store.sites[site]["dashboard"] = d
+
+    # ------------------------------------------------------------ BMC
+    def validate_bmc(self, raw, existing=None):
+        b = validate_bmc_fields(raw)
+        if b["site"] not in self.store.sites:
+            raise ValidationError(f"Site '{b['site']}' không tồn tại")
+        mine = bmc_ports(b)
+        for o in self.store.bmcs:
+            if o["site"] != b["site"] or bmc_key(o) == existing:
+                continue
+            theirs = bmc_ports(o)
+            if mine & theirs:
+                raise ValidationError(f"Cổng {sorted(mine & theirs)[0]} đã dùng cho BMC {o['port']} "
+                                      f"cùng site")
+        dash = self.store.sites[b["site"]].get("dashboard") or {}
+        if dash.get("enabled") and dash.get("port") in mine:
+            raise ValidationError(f"Cổng {dash['port']} đang dùng cho dashboard Traefik của site")
+        reserved = set((self.hb.get(b["site"]) or {}).get("reserved_ports") or [])
+        if mine & reserved:
+            raise ValidationError(f"Cổng {sorted(mine & reserved)[0]} đang dành cho agent/Traefik")
+        tkey = str(raw.get("template") or "")
+        if tkey:
+            if tkey not in all_templates(self.store.templates):
+                raise ValidationError(f"Không có mẫu '{tkey}'")
+            b["template"] = tkey
+        b["tags"] = parse_tags(raw.get("tags"))
+        exp = str(raw.get("expires") or "").strip()
+        if exp and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", exp):
+            raise ValidationError("Hạn sử dụng dạng YYYY-MM-DD")
+        b["expires"] = exp
+        return b
+
+    def free_ports(self, site, web_range=(8001, 8999), console_range=(5900, 5999),
+                   tcp_range=(17000, 17999), tcp_count=0):
+        used = set((self.hb.get(site) or {}).get("reserved_ports") or [])
+        for b in self.store.bmcs:
+            if b["site"] == site:
+                used |= bmc_ports(b)
+        dash = self.store.sites[site].get("dashboard") or {}
+        if dash.get("enabled"):
+            used.add(dash.get("port"))
+
+        def pick(lo, hi):
+            return next((p for p in range(lo, hi + 1) if p not in used), None)
+        tcp = []
+        for p in range(tcp_range[0], tcp_range[1] + 1):
+            if len(tcp) >= tcp_count:
+                break
+            if p not in used:
+                tcp.append(p)
+        return {"port": pick(*web_range), "console_port": pick(*console_range), "tcp": tcp}
+
+    # ------------------------------------------------------------ phat hanh
+    def record_report(self, site, rep):
+        """Ghi ket qua ap dung vao state[site].history (giu 40 lan gan nhat). Goi khi da giu store.lock."""
+        state = self.store.state.setdefault(site, {})
+        hist = state.setdefault("history", [])
+        key = (rep.get("rev"), rep.get("attempt"))
+        if hist and (hist[0].get("rev"), hist[0].get("attempt")) == key:
+            return
+        target = state.get("target") or {}
+        by = target.get("by", "") if (target.get("rev"), target.get("attempt")) == key else ""
+        hist.insert(0, {"rev": rep.get("rev"), "attempt": rep.get("attempt"), "ok": bool(rep.get("ok")),
+                        "at": rep.get("at") or now_iso(), "by": by,
+                        "steps": [{"step": x.get("step"), "ok": x.get("ok")} for x in (rep.get("log") or [])][:12]})
+        del hist[40:]
+
+    def release(self, site, user, retry=False):
+        st = self.store
+        with st.lock:
+            rel = st.desired(site)
+            state = st.state.setdefault(site, {})
+            target = state.get("target") or {}
+            if target.get("rev") == rel["rev"] and not retry and \
+                    self.site_status(site)["phase"] in ("synced", "applying"):
+                return False
+            path = st._p("releases", site, f"{rel['rev']}.json")
+            if not os.path.isfile(path):
+                write_json(path, {**rel, "created_at": now_iso(), "created_by": user})
+            state["target"] = {"rev": rel["rev"], "attempt": int(target.get("attempt", 0)) + 1,
+                               "at": now_iso(), "by": user}
+            st.save("state.json")
+            st.audit(user, "apply", f"rev {rel['rev']} ({len(rel['bmcs'])} BMC)", site)
+            return True
+
+    def plan(self, site):
+        st = self.store
+        h = self.hb.get(site) or {}
+        params = {**DEFAULT_PARAMS, **(h.get("params") or {})}
+        desired = st.desired(site)
+        applied = st.load_release(site, h.get("applied_rev") or
+                                  ((st.state.get(site) or {}).get("applied") or {}).get("rev"))
+        old_static, old_dyn = render_files(applied, params) if applied else ("", {})
+        new_static, new_dyn = render_files(desired, params)
+        changes = []
+        if old_static != new_static:
+            changes.append({"area": "static", "file": "traefik.yml",
+                            "kind": "modify" if old_static else "add",
+                            "diff": _diff(old_static, new_static, "a/traefik.yml", "b/traefik.yml")})
+        for name in sorted(set(old_dyn) | set(new_dyn)):
+            o, n = old_dyn.get(name, ""), new_dyn.get(name, "")
+            if o == n:
+                continue
+            kind = "add" if not o else "delete" if not n else "modify"
+            changes.append({"area": "dynamic", "file": name, "kind": kind,
+                            "diff": _diff(o, n, f"a/{name}" if o else "/dev/null",
+                                          f"b/{name}" if n else "/dev/null")})
+        for f in h.get("legacy_active") or []:
+            changes.append({"area": "nginx", "file": f, "kind": "disable", "diff": ""})
+        return changes
+
+    # ------------------------------------------------------------ sao luu
+    def snapshot(self, label):
+        st = self.store
+        bdir = st.cfg["backup_dir"]
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        dest = os.path.join(bdir, f"{stamp}-{re.sub(r'[^a-z0-9-]', '', label)[:20]}")
+        os.makedirs(dest)
+        for name in ("bmc.json", "settings.json", "sites.json"):
+            if os.path.isfile(st._p(name)):
+                shutil.copy2(st._p(name), os.path.join(dest, name))
+        write_json(os.path.join(dest, "meta.json"), {
+            "label": label, "ts": now_iso(), "bmcs": len(st.bmcs),
+            "sites": {k: sum(1 for b in st.bmcs if b["site"] == k) for k in st.sites}})
+        backups = sorted(d for d in os.listdir(bdir) if os.path.isdir(os.path.join(bdir, d)))
+        for old in backups[:-MAX_BACKUPS]:
+            shutil.rmtree(os.path.join(bdir, old), ignore_errors=True)
+        return os.path.basename(dest)
+
+    def list_backups(self):
+        bdir = self.store.cfg["backup_dir"]
+        out = []
+        for d in sorted(os.listdir(bdir), reverse=True):
+            meta = read_json(os.path.join(bdir, d, "meta.json"), None)
+            if meta is not None:
+                out.append({"name": d, **meta})
+        return out
+
+    def restore(self, name, user):
+        if not re.match(r"^[0-9A-Za-z-]+$", name):
+            raise ValidationError("Tên bản sao lưu không hợp lệ")
+        st = self.store
+        src = os.path.join(st.cfg["backup_dir"], name)
+        if not os.path.isfile(os.path.join(src, "meta.json")):
+            raise ValidationError("Không tìm thấy bản sao lưu")
+        with st.lock:
+            current = self.snapshot("before-restore")
+            st.bmcs = read_json(os.path.join(src, "bmc.json"), {"bmcs": []}).get("bmcs", [])
+            st.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in read_json(
+                os.path.join(src, "settings.json"), {}).items() if k in SETTINGS_DEFAULTS}}
+            old_sites = read_json(os.path.join(src, "sites.json"), {})
+            for k, s in old_sites.items():
+                if k in st.sites:  # giu token hien tai de agent khong bi mat ket noi
+                    s["token_hash"] = st.sites[k].get("token_hash", "")
+                    s["token_hint"] = st.sites[k].get("token_hint", "")
+            for k in list(st.sites):
+                if k not in old_sites and any(b["site"] == k for b in st.bmcs):
+                    old_sites[k] = st.sites[k]
+            for k, s in st.sites.items():
+                old_sites.setdefault(k, s)
+            st.sites = old_sites
+            for n in ("bmc.json", "settings.json", "sites.json"):
+                st.save(n)
+            st.audit(user, "restore", f"{name} (trước đó: {current})")
+        return {"ok": True, "backup": current}
+
+
+# =========================================================================== #
+# HTTP
+# =========================================================================== #
+
+def make_handler(app):
+    st = app.store
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        server_version = "bmcproxy"
+        sys_version = ""
+        timeout = 60          # ket noi treo khong lam ngheo luong
+        is_plain = False
+
+        def setup(self):
+            """Bat tay TLS trong luong rieng cua tung ket noi (khong chan cac ket noi khac).
+            Ket noi http thuong (go nham http://) -> tra 301 sang https://."""
+            ctx = getattr(self.server, "ssl_ctx", None)
+            if ctx is not None:
+                self.request.settimeout(15)
+                try:
+                    first = self.request.recv(1, socket.MSG_PEEK)
+                except OSError:
+                    first = b""
+                if first == b"\x16":  # ban ghi TLS handshake
+                    self.request = ctx.wrap_socket(self.request, server_side=True)
+                else:
+                    self.is_plain = True
+            super().setup()
+
+        def log_message(self, fmt, *args):
+            if "/agent/v1/sync" in (getattr(self, "path", "") or ""):
+                return
+            sys.stderr.write("%s - %s\n" % (self.client_address[0], fmt % args))
+
+        def send(self, code, body, ctype="application/json; charset=utf-8", headers=None):
+            if not isinstance(body, (bytes, str)):
+                body = json.dumps(body, ensure_ascii=False)
+            if isinstance(body, str):
+                body = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "
+                             "script-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def err(self, code, msg):
+            self.send(code, {"error": msg})
+
+        def cookie_token(self):
+            for part in (self.headers.get("Cookie") or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "bmcproxy_session":
+                    return v
+            return None
+
+        def body_json(self, limit=5_000_000):
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > limit:
+                raise ValidationError("Dữ liệu quá lớn")
+            raw = self.rfile.read(n) if n else b"{}"
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except ValueError:
+                raise ValidationError("JSON không hợp lệ")
+            if not isinstance(data, dict):
+                raise ValidationError("JSON phải là object")
+            return data
+
+        def do_GET(self):
+            self.route("GET")
+
+        def do_POST(self):
+            self.route("POST")
+
+        def do_PUT(self):
+            self.route("PUT")
+
+        def do_DELETE(self):
+            self.route("DELETE")
+
+        def route(self, method):
+            if self.is_plain:
+                host = re.sub(r"[^A-Za-z0-9.:\[\]-]", "", self.headers.get("Host") or "")
+                path = self.path if self.path.startswith("/") else "/"
+                self.send_response(301)
+                self.send_header("Location", f"https://{host}{path}")
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+                return
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            self.query = urllib.parse.parse_qs(parsed.query)
+            wp = (st.cfg.get("web_path") or "").rstrip("/")
+            if wp:
+                if path == wp:  # thieu dau / cuoi -> them vao de duong dan tuong doi dung
+                    self.send_response(301)
+                    self.send_header("Location", wp + "/" + (("?" + parsed.query) if parsed.query else ""))
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if path.startswith(wp + "/"):
+                    path = path[len(wp):]
+                elif not (path.startswith(("/agent/v1/", "/install/")) or path == "/api/zabbix"):
+                    return self.send(404, b"Not found", "text/plain; charset=utf-8")
+            try:
+                st.refresh()
+                if method == "GET" and path in STATIC:
+                    fname, ctype = STATIC[path]
+                    with open(os.path.join(WEB_DIR, fname), "rb") as f:
+                        return self.send(200, f.read(), ctype)
+                if path.startswith("/agent/v1/"):
+                    return self.agent_api(method, path[len("/agent/v1/"):])
+                m = re.match(r"^/install/([A-Za-z0-9_-]{20,64})(/agent\.zip)?$", path)
+                if m and method == "GET":
+                    return self.install_get(m.group(1), bool(m.group(2)))
+                if path == "/api/zabbix" and method == "GET":
+                    return self.api_zabbix()
+                if path == "/api/login" and method == "POST":
+                    return self.api_login()
+                if path == "/api/login-info" and method == "GET":
+                    lc = st.auth.get("ldap") or {}
+                    on = bool(lc.get("enabled")) and gw_ldap.available()
+                    return self.send(200, {"ldap": on, "domain": (lc.get("domain") or "") if on else ""})
+                if not path.startswith("/api/"):
+                    return self.err(404, "Không tìm thấy")
+                name = app.session_user(self.cookie_token())
+                if not name:
+                    return self.err(401, "Chưa đăng nhập")
+                if method != "GET" and self.headers.get("X-Requested-With") != "bmcproxy":
+                    return self.err(403, "Thiếu header chống CSRF")
+                return self.api(method, path.strip("/").split("/")[1:], app.user(name))
+            except ValidationError as e:
+                return self.err(400, str(e))
+            except PermissionError as e:
+                return self.err(403, str(e))
+            except Exception as e:
+                traceback.print_exc()
+                return self.err(500, f"Lỗi máy chủ: {e}")
+
+        # ------------------------------------------------------------ agent
+        def agent_site(self):
+            auth = self.headers.get("Authorization") or ""
+            site = self.headers.get("X-Agent-Site") or ""
+            token = auth[7:] if auth.startswith("Bearer ") else ""
+            s = st.sites.get(site)
+            if not s or not token or not s.get("token_hash") or \
+                    not hmac.compare_digest(hash_token(token), s["token_hash"]):
+                return None
+            ip = self.client_address[0]
+            if s.get("allowed_ips") and ip not in s["allowed_ips"]:
+                return None
+            return site
+
+        def agent_api(self, method, name):
+            site = self.agent_site()
+            if not site:
+                claimed = clean_text(self.headers.get("X-Agent-Site"), 40)
+                sys.stderr.write(f"agent bị từ chối: site={claimed!r} ip={self.client_address[0]} "
+                                 "(sai token, chưa có site, hoặc IP không nằm trong danh sách)\n")
+                return self.err(401, "Agent không hợp lệ (token / site / IP)")
+            if method != "POST":
+                return self.err(405, "Chỉ nhận POST")
+            data = self.body_json()
+            if name == "sync":
+                data["_received"] = time.time()
+                data["_ip"] = self.client_address[0]
+                for k in ("logs", "diag", "action"):
+                    if isinstance(data.get(k), dict):
+                        app.extra.setdefault(site, {})[k] = data.pop(k)
+                was_online = app.online(site)
+                app.hb[site] = data
+                if not was_online:
+                    st.audit("agent", "agent-online", data.get("hostname", ""), site)
+                with st.lock:
+                    cmds = app.commands.pop(site, [])
+                    target = (st.state.get(site) or {}).get("target")
+                resp = {"target": target, "commands": cmds, "server_time": now_iso()}
+                att = data.get("attempt") or {}
+                # Agent da ap dung nhung goi /report bi mat (mang chap chon): lay ket qua tu heartbeat
+                if target and (att.get("rev"), att.get("attempt")) == (target["rev"], target["attempt"]):
+                    with st.lock:
+                        state = st.state.setdefault(site, {})
+                        last = state.get("last_report") or {}
+                        if (last.get("rev"), last.get("attempt")) != (att.get("rev"), att.get("attempt")):
+                            state["last_report"] = {k: att.get(k) for k in ("rev", "attempt", "ok", "log", "at")}
+                            app.record_report(site, state["last_report"])
+                            if att.get("ok"):
+                                state["applied"] = {"rev": att.get("rev"), "at": att.get("at")}
+                            st.save("state.json")
+                if target and (att.get("rev"), att.get("attempt")) != (target["rev"], target["attempt"]):
+                    resp["release"] = st.load_release(site, target["rev"])
+                return self.send(200, resp)
+            if name == "report":
+                with st.lock:
+                    state = st.state.setdefault(site, {})
+                    state["last_report"] = {k: data.get(k) for k in ("rev", "attempt", "ok", "log", "at")}
+                    app.record_report(site, state["last_report"])
+                    if data.get("ok"):
+                        state["applied"] = {"rev": data.get("rev"), "at": data.get("at")}
+                    st.save("state.json")
+                st.audit("agent", "apply-ok" if data.get("ok") else "apply-failed",
+                         f"rev {data.get('rev')}", site)
+                return self.send(200, {"ok": True})
+            if name == "import":
+                return self.send(200, self.agent_import(site, data))
+            return self.err(404, "Không tìm thấy")
+
+        def agent_import(self, site, data):
+            accepted, skipped, enabled_auth = [], list(data.get("skipped") or []), []
+            with st.lock:
+                app.snapshot("import")
+                for item in data.get("items") or []:
+                    if not isinstance(item, dict) or not isinstance(item.get("raw"), dict):
+                        continue
+                    try:
+                        port = to_port(item["raw"].get("port"), "Cổng")
+                    except ValidationError:
+                        port = None
+                    if port and st.get_bmc(site, port):
+                        # BMC da co (vd nhap lai sau khi quay ve nginx): van ghi nhan file nginx
+                        # de lan ap dung toi agent tat file do, tranh trung cong voi Traefik
+                        accepted.append(item.get("file"))
+                        skipped.append({"file": item.get("file"), "reason": f"cổng {port} đã có, giữ BMC hiện tại"})
+                        continue
+                    try:
+                        b = app.validate_bmc({**item["raw"], "site": site})
+                    except ValidationError as e:
+                        skipped.append({"file": item.get("file"), "reason": str(e)})
+                        continue
+                    b.update(imported_from=clean_text(item.get("file"), 120),
+                             imported_auth=bool(item.get("had_auth")),
+                             imported_console_auth=item.get("had_console_auth"),
+                             updated_at=now_iso(), updated_by="import")
+                    st.bmcs.append(b)
+                    accepted.append(item.get("file"))
+                    if not item.get("had_auth") or item.get("had_console_auth") is False:
+                        enabled_auth.append(b["port"])
+                    url = item.get("auth_url") or ""
+                    s = st.sites[site]
+                    if url and url != st.settings["auth_url"] and "auth_url" not in s["overrides"]:
+                        try:
+                            s["overrides"].update(validate_settings_values({"auth_url": url}, True))
+                            st.save("sites.json")
+                        except ValidationError:
+                            pass
+                st.save("bmc.json")
+                st.audit("agent", "import", f"{len(accepted)} BMC, bật xác thực {len(enabled_auth)}", site)
+            return {"accepted": accepted, "skipped": skipped, "auth_enabled": enabled_auth}
+
+        # ------------------------------------------------------------ dang nhap
+        def api_login(self):
+            ip = self.client_address[0]
+            if not app.login_allowed(ip):
+                return self.err(429, "Sai quá nhiều lần, thử lại sau 5 phút")
+            data = self.body_json(10_000)
+            name = str(data.get("user", ""))[:64]
+            password = str(data.get("password", ""))
+            rec = st.users.get(name)
+            lc = st.auth.get("ldap") or {}
+            if rec and rec.get("source") != "ldap" or not (lc.get("enabled") and gw_ldap.available()):
+                # tai khoan rieng cua web (admin du phong van vao duoc khi AD hong)
+                if not rec or rec.get("source") == "ldap" or not check_password(rec, password):
+                    app.login_failed(ip)
+                    if rec:
+                        st.audit(name, "login-fail", f"{ip} sai mật khẩu")
+                    return self.err(401, "Sai tài khoản hoặc mật khẩu")
+            else:
+                name, rec, msg = self.ldap_login(lc, name, password, ip)
+                if msg:
+                    return msg
+            reason = app.blocked_reason(rec)
+            if reason:
+                st.audit(name, "login-fail", f"{ip} {reason}")
+                return self.err(403, reason)
+            if rec.get("totp_secret"):
+                otp = str(data.get("otp") or "").strip()
+                if not otp:
+                    return self.send(401, {"error": "Nhập mã xác thực 2 lớp (6 số trên ứng dụng Authenticator)",
+                                           "need_otp": True})
+                if not totp_check(rec["totp_secret"], otp):
+                    app.login_failed(ip)
+                    st.audit(name, "login-fail", f"{ip} sai mã 2FA")
+                    return self.send(401, {"error": "Mã xác thực 2 lớp không đúng", "need_otp": True})
+            app.login_ok(ip)
+            remember = bool(data.get("remember"))
+            token = app.new_session(name, ip, remember)
+            with st.lock:
+                rec["last_login"] = {"ts": now_iso(), "ip": ip}
+                try:
+                    st.save("users.json")
+                except ValidationError:
+                    pass
+            st.audit(name, "login", ip)
+            secure = "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""
+            # Ghi nho: cookie 30 ngay. Khong: cookie mat khi dong trinh duyet (web gioi han 12 gio)
+            cookie = (f"bmcproxy_session={token}; Path={(st.cfg.get('web_path') or '') + '/'}; HttpOnly; SameSite=Strict"
+                      + (f"; Max-Age={REMEMBER_TTL}" if remember else "") + secure)
+            return self.send(200, app.user(name), headers={"Set-Cookie": cookie})
+
+        def ldap_login(self, lc, raw, password, ip):
+            """-> (ten, ban ghi, None) hoac (_, _, phan hoi loi da gui)."""
+            name = gw_ldap.normalize_user(raw)
+            local = st.users.get(name)
+            if not name or (local and local.get("source") != "ldap"):
+                # trung ten tai khoan rieng cua web -> khong cho AD "chiem" tai khoan do
+                app.login_failed(ip)
+                return None, None, self.err(401, "Sai tài khoản hoặc mật khẩu")
+            try:
+                info = gw_ldap.authenticate(lc, name, password)
+                role, sites = gw_ldap.decide(lc, info, local)
+            except gw_ldap.LdapError as e:
+                if e.kind == "bad":
+                    app.login_failed(ip)
+                    if local:
+                        st.audit(name, "login-fail", f"{ip} AD: {e}")
+                    return None, None, self.err(401, str(e))
+                st.audit(name, "login-fail", f"{ip} AD: {e}")
+                if e.kind == "denied":
+                    return None, None, self.err(403, str(e))
+                sys.stderr.write(f"AD/LDAP: {e}\n")
+                return None, None, self.err(503, "Không kiểm tra được tài khoản AD (máy chủ AD không trả lời). "
+                                                 "Thử lại sau hoặc dùng tài khoản riêng của web.")
+            with st.lock:
+                rec = st.users.get(name)
+                if rec is None:
+                    rec = st.users[name] = {"created_at": now_iso(), "created_by": "AD"}
+                    st.audit("AD", "user-add", f"{name} ({role}) tạo tự động khi đăng nhập AD")
+                elif (rec.get("role"), rec.get("sites") or []) != (role, sites):
+                    st.audit("AD", "user-edit", f"{name}: vai trò theo nhóm AD → {role}"
+                                                + (f" ({', '.join(sites)})" if sites else ""))
+                rec.update({"source": "ldap", "role": role, "sites": [s for s in sites if s in st.sites],
+                            "ldap_dn": info["dn"], "ldap_groups": info["groups"][:60]})
+                for k in ("full_name", "email"):
+                    if info[k]:
+                        rec[k] = info[k][:120]
+                for k in ("salt", "iterations", "hash", "must_change"):
+                    rec.pop(k, None)
+            return name, rec, None
+
+        def api_ldap(self, method, sub, u):
+            app.need_admin(u)
+            old = st.auth.get("ldap") or {}
+            if method == "GET" and sub is None:
+                return self.send(200, gw_ldap.public_view(old))
+            data = self.body_json(20_000)
+            if method == "PUT" and sub is None:
+                cfg = gw_ldap.validate(data, old, tuple(st.sites))
+                with st.lock:
+                    st.auth["ldap"] = cfg
+                    st.save("auth.json")
+                st.audit(u["name"], "ldap", ("bật" if cfg["enabled"] else "tắt") + f" đăng nhập AD ({cfg['servers']})")
+                return self.send(200, gw_ldap.public_view(cfg))
+            if method == "POST" and sub == "test":
+                # thu voi cai dat dang nhap tren form (chua can Luu), khong tao / sua tai khoan nao
+                cfg = gw_ldap.validate({**data, "enabled": False}, old, tuple(st.sites))
+                cfg["enabled"] = True
+                if not gw_ldap.available():
+                    return self.send(200, {"ok": False, "error": "Server web chưa cài ldap3: sudo apt install -y python3-ldap3"})
+                user = str(data.get("test_user") or "")
+                if not user:
+                    try:
+                        return self.send(200, {"ok": True, "message": gw_ldap.test_connection(cfg)})
+                    except gw_ldap.LdapError as e:
+                        return self.send(200, {"ok": False, "error": str(e)})
+                try:
+                    info = gw_ldap.authenticate(cfg, user, str(data.get("test_password") or ""))
+                except gw_ldap.LdapError as e:
+                    return self.send(200, {"ok": False, "error": str(e)})
+                local = st.users.get(info["name"])
+                try:
+                    role, sites = gw_ldap.decide(cfg, info, local if local and local.get("source") == "ldap" else None)
+                    verdict = ""
+                except gw_ldap.LdapError as e:
+                    role, sites, verdict = "", [], str(e)
+                if local and local.get("source") != "ldap":
+                    verdict = f"Web đã có tài khoản riêng tên {info['name']} - đăng nhập AD với tên này sẽ bị từ chối"
+                st.audit(u["name"], "ldap-test", info["name"])
+                return self.send(200, {"ok": True, "user": {k: info[k] for k in ("name", "dn", "full_name", "email", "groups")},
+                                       "role": role, "sites": sites, "verdict": verdict})
+            return self.err(404, "Không tìm thấy API")
+
+        def api_zabbix(self):
+            token = st.cfg.get("zabbix_token") or ""
+            given = self.headers.get("X-Api-Token") or ""
+            name = app.session_user(self.cookie_token())
+            if not ((token and hmac.compare_digest(token, given)) or name):
+                return self.err(401, "Sai token")
+            u = app.user(name) if name else {"role": "admin", "sites": [], "name": "zabbix"}
+            if self.query.get("type") == ["sites"]:
+                return self.send(200, [{
+                    "site": s["key"], "online": int(s["online"]), "phase": s["phase"],
+                    "bmcs": s["enabled"], "down": s["down"], "router_errors": s["traefik"]["errors"],
+                } for s in (app.site_status(k) for k in app.visible_sites(u))])
+            out = []
+            for v in app.bmc_views(u):
+                if not v["enabled"]:
+                    continue
+                h, stt = v["health"] or {}, v["auth_stats"] or {}
+                r = v["traefik"].get(f"bmc-{v['port']}") or {}
+                out.append({
+                    "site": v["site"], "port": v["port"], "key": f"{v['site']}:{v['port']}",
+                    "upstream": v["upstream"], "note": v["note"], "auth": int(v["auth"]),
+                    "site_online": int(v["site_online"]),
+                    "up": int(bool((h.get("web") or {}).get("up"))),
+                    "latency_ms": (h.get("web") or {}).get("ms"),
+                    "console_port": v["console_port"],
+                    "console_up": int(bool((h.get("console") or {}).get("up"))) if v["console_port"] else None,
+                    "router_ok": int(r.get("status") == "enabled") if r else None,
+                    "auth_ok": stt.get("ok", 0), "auth_deny": stt.get("deny", 0),
+                    "auth_error": stt.get("error", 0),
+                })
+            return self.send(200, out)
+
+        # ------------------------------------------------------------ API web
+        def api(self, method, parts, u):
+            res = parts[0] if parts else ""
+            a1 = parts[1] if len(parts) > 1 else None
+            a2 = parts[2] if len(parts) > 2 else None
+
+            if res == "me" and method == "GET":
+                return self.send(200, {**u, "version": VERSION})
+            if res == "logout" and method == "POST":
+                app.drop_session(self.cookie_token())
+                return self.send(200, {"ok": True},
+                                 headers={"Set-Cookie": f"bmcproxy_session=; Path={(st.cfg.get('web_path') or '') + '/'}; Max-Age=0"})
+            if res == "ldap":
+                return self.api_ldap(method, a1, u)
+            if res == "password" and method == "POST":
+                if st.users[u["name"]].get("source") == "ldap":
+                    raise ValidationError("Tài khoản AD: đổi mật khẩu trên Windows (Ctrl+Alt+Del → Đổi mật khẩu) hoặc nhờ IT")
+                data = self.body_json(10_000)
+                if not check_password(st.users[u["name"]], str(data.get("old", ""))):
+                    raise ValidationError("Mật khẩu cũ không đúng")
+                new = str(data.get("new", ""))
+                if len(new) < 10:
+                    raise ValidationError("Mật khẩu mới tối thiểu 10 ký tự")
+                if check_password(st.users[u["name"]], new):
+                    raise ValidationError("Mật khẩu mới phải khác mật khẩu cũ")
+                with st.lock:
+                    st.users[u["name"]].update(hash_password(new))
+                    st.users[u["name"]].pop("must_change", None)
+                    st.users[u["name"]]["password_changed"] = now_iso()
+                    st.save("users.json")
+                st.audit(u["name"], "password")
+                return self.send(200, {"ok": True})
+            if res == "2fa" and method == "POST":
+                return self.api_2fa(u)
+
+            if res == "overview" and method == "GET":
+                return self.send(200, self.overview(u))
+            if res == "sites":
+                return self.api_sites(method, a1, a2, u)
+            if res == "templates":
+                return self.api_templates(method, a1, a2, u)
+            if res == "bmcs":
+                return self.api_bmcs(method, a1, a2, u, parts[3] if len(parts) > 3 else None)
+            if res == "render" and method == "POST":
+                data = self.body_json()
+                orig = data.get("_orig")
+                existing = (orig["site"], int(orig["port"])) if isinstance(orig, dict) else None
+                b = app.validate_bmc(data, existing)
+                h = app.hb.get(b["site"]) or {}
+                params = {**DEFAULT_PARAMS, **(h.get("params") or {})}
+                return self.send(200, render_bmc(b, params), "text/plain; charset=utf-8")
+            if res == "settings":
+                if method == "GET":
+                    return self.send(200, {"settings": st.settings, "overridable": OVERRIDABLE,
+                                           "zabbix_enabled": bool(st.cfg.get("zabbix_token")),
+                                           "offline_after": st.cfg["agent_offline_after"],
+                                           "version": VERSION})
+                if method == "PUT":
+                    app.need_admin(u)
+                    s = validate_settings_values(self.body_json())
+                    with st.lock:
+                        st.settings = s
+                        st.save("settings.json")
+                    st.audit(u["name"], "settings")
+                    return self.send(200, s)
+            if res == "warnings" and method == "GET":
+                return self.send(200, self.warnings(u))
+            if res == "apply" and method == "POST":
+                data = self.body_json()
+                sites = data.get("sites") or [k for k in app.visible_sites(u) if app.can_edit(u, k)]
+                out = {}
+                for k in sites:
+                    if k not in st.sites:
+                        continue
+                    app.need_edit(u, k)
+                    out[k] = app.release(k, u["name"], retry=bool(data.get("retry")))
+                return self.send(200, {"released": out})
+            if res == "traefik" and method == "GET":
+                site = (self.query.get("site") or [""])[0]
+                if site not in st.sites or not app.can_view(u, site):
+                    raise ValidationError("Chọn site")
+                return self.send(200, {**((app.hb.get(site) or {}).get("traefik") or {}),
+                                       "online": app.online(site)})
+            if res == "backups":
+                app.need_admin(u)
+                if method == "GET" and a1 is None:
+                    return self.send(200, app.list_backups())
+                if method == "POST" and a1 and a2 == "restore":
+                    return self.send(200, app.restore(a1, u["name"]))
+            if res == "audit" and method == "GET":
+                if u["role"] == "viewer":
+                    raise PermissionError("Không có quyền xem nhật ký")
+                rows = st.read_audit()
+                if u["role"] != "admin" and u["sites"]:
+                    rows = [r for r in rows if not r.get("site") or r["site"] in u["sites"]]
+                return self.send(200, rows)
+            if res == "users":
+                return self.api_users(method, a1, u, a2)
+            return self.err(404, "Không tìm thấy API")
+
+        # ------------------------------------------------------------ site
+        def api_sites(self, method, key, action, u):
+            if method == "GET" and key is None:
+                return self.send(200, [app.site_status(k) for k in app.visible_sites(u)])
+            if method == "POST" and key is None:
+                app.need_admin(u)
+                data = self.body_json()
+                key = str(data.get("key", "")).strip()
+                if not RE_SITE_KEY.match(key):
+                    raise ValidationError("Mã site chỉ gồm a-z, 0-9, - (tối đa 32 ký tự)")
+                if key in st.sites:
+                    raise ValidationError("Mã site đã tồn tại")
+                rec = new_site_record(key, key.upper(), "")
+                self.apply_site_fields(rec, data)
+                token = secrets.token_urlsafe(32)
+                rec["token_hash"], rec["token_hint"] = hash_token(token), token[-4:]
+                with st.lock:
+                    st.sites[key] = rec
+                    if isinstance(data.get("dashboard"), dict):
+                        try:
+                            app.update_dashboard(key, data["dashboard"])
+                        except ValidationError:
+                            del st.sites[key]
+                            raise
+                    st.save("sites.json")
+                st.audit(u["name"], "site-add", rec["domain"], key)
+                return self.send(201, {"site": app.site_status(key), "token": token,
+                                       "agent_config": self.agent_config(key, token)})
+            if key not in st.sites or not app.can_view(u, key):
+                return self.err(404, "Không có site này")
+            if method == "GET" and action == "free-ports":
+                n = to_port((self.query.get("tcp") or ["0"])[0] or 0, "Số cổng", True) if \
+                    (self.query.get("tcp") or ["0"])[0] not in ("", "0") else 0
+                return self.send(200, app.free_ports(key, tcp_count=min(n or 0, 12)))
+            if method == "GET" and action == "plan":
+                return self.send(200, app.plan(key))
+            if method == "GET" and action is None:
+                return self.send(200, app.site_status(key))
+            if method == "PUT" and action is None:
+                app.need_admin(u)
+                data = self.body_json()
+                with st.lock:
+                    self.apply_site_fields(st.sites[key], data)
+                    if isinstance(data.get("dashboard"), dict):
+                        app.update_dashboard(key, data["dashboard"])
+                    st.save("sites.json")
+                st.audit(u["name"], "site-edit",
+                         "dashboard " + ("bật" if st.sites[key].get("dashboard", {}).get("enabled") else "tắt")
+                         if isinstance(data.get("dashboard"), dict) else "", key)
+                return self.send(200, app.site_status(key))
+            if method == "DELETE" and action is None:
+                app.need_admin(u)
+                if any(b["site"] == key for b in st.bmcs):
+                    raise ValidationError("Site còn BMC, hãy xoá hoặc chuyển BMC trước")
+                with st.lock:
+                    app.snapshot("site-delete")
+                    del st.sites[key]
+                    st.state.pop(key, None)
+                    st.save("sites.json")
+                    st.save("state.json")
+                app.hb.pop(key, None)
+                st.audit(u["name"], "site-delete", "", key)
+                return self.send(200, {"ok": True})
+            if method == "POST" and action == "token":
+                app.need_admin(u)
+                token = secrets.token_urlsafe(32)
+                with st.lock:
+                    st.sites[key]["token_hash"] = hash_token(token)
+                    st.sites[key]["token_hint"] = token[-4:]
+                    st.save("sites.json")
+                st.audit(u["name"], "site-token", "đổi token agent", key)
+                return self.send(200, {"token": token, "agent_config": self.agent_config(key, token)})
+            if method == "POST" and action == "command":
+                cmd_body = self.body_json()
+                name = str(cmd_body.get("name", ""))
+                if name not in ("import", "recheck", "clear_cache", "logs", "diagnose", "restart_traefik",
+                                "restart_agent"):
+                    raise ValidationError("Lệnh không hợp lệ")
+                if name in ("clear_cache", "logs", "restart_traefik", "restart_agent"):
+                    app.need_admin(u)
+                else:
+                    app.need_edit(u, key)
+                cmd = {"name": name}
+                if name == "diagnose":  # gui kem danh sach BMC hien tai tren web (ke ca BMC chua ap dung)
+                    cmd["bmcs"] = [{k: b.get(k) for k in ("port", "upstream", "legacy_tls", "note", "enabled")}
+                                   for b in st.desired(key)["bmcs"]
+                                   if not cmd_body.get("port") or b["port"] == int(cmd_body["port"])]
+                with st.lock:
+                    app.commands.setdefault(key, []).append(cmd)
+                st.audit(u["name"], f"command-{name}", "", key)
+                return self.send(200, {"queued": True, "online": app.online(key)})
+            if method == "POST" and action == "install":
+                app.need_admin(u)
+                code = secrets.token_urlsafe(24)
+                with st.lock:
+                    now = time.time()
+                    for h in [h for h, v in app.install_codes.items() if v["exp"] < now - INSTALL_PKG_WINDOW]:
+                        del app.install_codes[h]
+                    app.install_codes[hash_token(code)] = {"site": key, "exp": now + INSTALL_TTL, "by": u["name"],
+                                                           "used_at": None, "ip": None}
+                st.audit(u["name"], "site-install-code", "tạo lệnh cài agent (1 lần, 1 giờ)", key)
+                return self.send(200, {"code": code, "path": f"/install/{code}", "expires_in": INSTALL_TTL,
+                                       "package": bool(self.agent_package()), "online": app.online(key)})
+            if method == "GET" and action in ("logs", "diag", "action"):
+                if action in ("logs", "action"):
+                    app.need_admin(u)
+                return self.send(200, (app.extra.get(key) or {}).get(action) or {})
+            if method == "GET" and action == "history":
+                state = st.state.get(key) or {}
+                applied = (state.get("applied") or {}).get("rev")
+                desired = st.desired(key)["rev"]
+                rows = []
+                for h in state.get("history") or []:
+                    rel = st.load_release(key, h.get("rev"))
+                    rows.append({**h, "bmcs": len(rel["bmcs"]) if rel else None, "available": bool(rel),
+                                 "applied": h.get("rev") == applied, "desired": h.get("rev") == desired})
+                return self.send(200, {"rows": rows, "applied": applied, "desired": desired})
+            if method == "POST" and action == "rollback":
+                app.need_edit(u, key)
+                rev = str(self.body_json().get("rev", ""))
+                rel = st.load_release(key, rev)
+                if not rel:
+                    raise ValidationError("Không còn bản cấu hình này trên web")
+                with st.lock:
+                    snap = app.snapshot("rollback")
+                    meta = {b["port"]: {k: b[k] for k in BMC_META if k in b} for b in st.bmcs if b["site"] == key}
+                    restored = []
+                    for b in rel["bmcs"]:
+                        nb = {**b, "site": key}  # y nguyen ban cu -> cung ma rev
+                        nb.update(meta.get(nb["port"], {}))
+                        nb["updated_at"], nb["updated_by"] = now_iso(), u["name"]
+                        restored.append(nb)
+                    st.bmcs = [b for b in st.bmcs if b["site"] != key] + restored
+                    st.save("bmc.json")
+                st.audit(u["name"], "rollback", f"về bản {rev} ({len(restored)} BMC), sao lưu trước: {snap}", key)
+                return self.send(200, {"ok": True, "bmcs": len(restored), "backup": snap})
+            return self.err(404, "Không tìm thấy API")
+
+        # ------------------------------------------------------------ lenh cai agent 1 dong
+        @staticmethod
+        def agent_package():
+            try:
+                pk = sorted(f for f in os.listdir(AGENT_PKG_DIR) if f.startswith("bmc-gateway-agent") and f.endswith(".zip"))
+            except OSError:
+                return None
+            return os.path.join(AGENT_PKG_DIR, pk[-1]) if pk else None
+
+        def install_get(self, code, want_pkg):
+            ip = self.client_address[0]
+            rec = app.install_codes.get(hash_token(code))
+            now = time.time()
+            if want_pkg:
+                if not rec or not rec["used_at"] or rec["ip"] != ip or now > rec["used_at"] + INSTALL_PKG_WINDOW:
+                    return self.err(403, "Mã cài không hợp lệ / đã hết hạn")
+                pkg = self.agent_package()
+                if not pkg:
+                    return self.err(404, "Web chưa có gói agent (cài web bằng gói bmc-gateway-web mới)")
+                with open(pkg, "rb") as f:
+                    return self.send(200, f.read(), "application/zip")
+            if not rec or rec["used_at"] or now > rec["exp"]:
+                body = "echo 'LOI: ma cai da dung hoac het han - tao lenh moi tren web: Site -> Cai agent' >&2; exit 1\n"
+                return self.send(410, body.encode(), "text/x-shellscript; charset=utf-8")
+            site = rec["site"]
+            if site not in st.sites:
+                return self.err(404, "Site đã bị xoá")
+            if not self.agent_package():
+                body = "echo 'LOI: web chua co goi agent (cai lai web bang goi bmc-gateway-web moi)' >&2; exit 1\n"
+                return self.send(503, body.encode(), "text/x-shellscript; charset=utf-8")
+            token = secrets.token_urlsafe(32)
+            with st.lock:
+                rec["used_at"], rec["ip"] = now, ip
+                s = st.sites[site]
+                s["token_hash"], s["token_hint"] = hash_token(token), token[-4:]
+                added = ""
+                if ip not in (s.get("allowed_ips") or []):
+                    s["allowed_ips"] = (s.get("allowed_ips") or []) + [ip]
+                    added = f", thêm IP {ip} vào IP được phép"
+                st.save("sites.json")
+            st.audit(rec["by"], "site-install", f"server {ip} chạy lệnh cài agent (token mới{added})", site)
+            scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
+            host = re.sub(r"[^A-Za-z0-9.:\[\]-]", "", self.headers.get("Host") or "")
+            web = f"{scheme}://{host}"
+            cfg = self.agent_config(site, token)
+            cfg["controller_url"] = web
+            script = (INSTALL_SCRIPT.replace("__WEB__", web).replace("__CODE__", code).replace("__SITE__", site)
+                      .replace("__NOW__", now_iso()).replace("__AGENT_JSON__", json.dumps(cfg, indent=1)))
+            return self.send(200, script.encode("utf-8"), "text/x-shellscript; charset=utf-8")
+
+        @staticmethod
+        def apply_site_fields(rec, data):
+            if "label" in data:
+                rec["label"] = clean_text(data["label"], 60) or rec["label"]
+            if "domain" in data:
+                d = str(data["domain"]).strip()
+                if not RE_DOMAIN.match(d):
+                    raise ValidationError("Tên miền không hợp lệ")
+                rec["domain"] = d
+            if not rec.get("domain"):
+                raise ValidationError("Cần nhập tên miền của site")
+            if "allowed_ips" in data:
+                ips = [str(x).strip() for x in data["allowed_ips"] if str(x).strip()]
+                for ip in ips:
+                    if not RE_IP.match(ip):
+                        raise ValidationError(f"IP '{ip}' không hợp lệ")
+                rec["allowed_ips"] = ips
+            if "overrides" in data:
+                ov = {k: v for k, v in dict(data["overrides"]).items() if k in OVERRIDABLE}
+                rec["overrides"] = validate_settings_values(ov, partial=True)
+
+        def agent_config(self, key, token):
+            host = self.headers.get("Host") or f"<ip-web>:{st.cfg['listen_port']}"
+            scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
+            return {"site": key, "controller_url": f"{scheme}://{host}", "token": token,
+                    "verify_tls": scheme == "https", "poll_interval": 10,
+                    "traefik_static_file": "/etc/traefik/traefik.yml",
+                    "traefik_dynamic_dir": "/etc/traefik/dynamic",
+                    "traefik_restart_cmd": ["systemctl", "restart", "traefik"],
+                    "traefik_api": "http://127.0.0.1:18080",
+                    "nginx_conf_dir": "/etc/nginx/conf.d",
+                    "nginx_test_cmd": ["nginx", "-t"],
+                    "nginx_reload_cmd": ["systemctl", "reload", "nginx"]}
+
+        # ------------------------------------------------------------ BMC
+        def api_templates(self, method, key, action, u):
+            if method == "GET" and key is None:
+                return self.send(200, all_templates(st.templates))
+            if method == "POST" and action == "apply":
+                tpl = all_templates(st.templates).get(key)
+                if not tpl:
+                    return self.err(404, "Không có mẫu này")
+                d = self.body_json()
+                return self.send(200, apply_template(tpl, d.get("port"), d.get("ip"), d.get("console_port")))
+            app.need_admin(u)
+            if key in BUILTIN_TEMPLATES:
+                raise ValidationError("Mẫu có sẵn không sửa được - hãy tạo mẫu mới với mã khác")
+            if method == "PUT":
+                t = validate_template(key, self.body_json())
+                with st.lock:
+                    st.templates[key] = t
+                    st.save("templates.json")
+                st.audit(u["name"], "template-save", f"{key} ({t['label']})")
+                return self.send(200, t)
+            if method == "DELETE":
+                if any(b.get("template") == key for b in st.bmcs):
+                    raise ValidationError("Mẫu đang được BMC dùng")
+                with st.lock:
+                    st.templates.pop(key, None)
+                    st.save("templates.json")
+                st.audit(u["name"], "template-delete", key)
+                return self.send(200, {"ok": True})
+            return self.err(404, "Không tìm thấy API")
+
+        def bulk_add(self, u, data):
+            """Them / cap nhat nhieu BMC tu text dan vao. commit=False chi kiem tra."""
+            rows = parse_rows(str(data.get("text", "")))
+            if not rows:
+                raise ValidationError("Chưa có dòng nào")
+            if len(rows) > 2000:
+                raise ValidationError("Tối đa 2000 dòng mỗi lần")
+            update = bool(data.get("update_existing"))
+            tpls = all_templates(st.templates)
+            results, planned, seen = [], [], {}
+            with st.lock:
+                for line, row in rows:
+                    r = {"line": line, "site": row.get("site", ""), "port": row.get("port", "")}
+                    try:
+                        raw = row_to_bmc(row, tpls)
+                        app.need_edit(u, raw["site"])
+                        port = to_port(raw["port"], "Cổng")
+                        cur = st.get_bmc(raw["site"], port)
+                        if cur and not update:
+                            raise ValidationError("BMC đã có (tick 'Cập nhật BMC đã có' để ghi đè)")
+                        b = app.validate_bmc({**(cur or {}), **raw}, (raw["site"], port) if cur else None)
+                        ports = bmc_ports(b)
+                        for pt in ports:
+                            other = seen.get((b["site"], pt))
+                            if other:
+                                raise ValidationError(f"trùng cổng {pt} với dòng {other}")
+                        for pt in ports:
+                            seen[(b["site"], pt)] = line
+                        if cur:
+                            for k in BMC_META[:3]:
+                                if k in cur:
+                                    b[k] = cur[k]
+                        planned.append((cur, b))
+                        r.update(ok=True, action="sửa" if cur else "thêm", upstream=b["upstream"],
+                                 console_port=b["console_port"], template=b.get("template", ""))
+                    except (ValidationError, PermissionError) as e:
+                        r.update(ok=False, error=str(e))
+                    results.append(r)
+                errors = sum(1 for r in results if not r["ok"])
+                saved = 0
+                if data.get("commit") and not errors:
+                    by_site = {}
+                    for cur, b in planned:
+                        b["updated_at"], b["updated_by"] = now_iso(), u["name"]
+                        if cur:
+                            st.bmcs = [b if bmc_key(x) == bmc_key(cur) else x for x in st.bmcs]
+                        else:
+                            st.bmcs.append(b)
+                        saved += 1
+                        by_site[b["site"]] = by_site.get(b["site"], 0) + 1
+                    st.save("bmc.json")
+                    for k, n in by_site.items():
+                        st.audit(u["name"], "bmc-bulk", f"{n} BMC", k)
+            return {"rows": results, "errors": errors, "saved": saved}
+
+        def batch(self, u, data):
+            keys = [(str(k.get("site")), to_port(k.get("port"), "Cổng")) for k in data.get("keys") or []]
+            if not keys:
+                raise ValidationError("Chưa chọn BMC nào")
+            action = data.get("action")
+            fields = {k: v for k, v in dict(data.get("fields") or {}).items()
+                      if k in ("auth", "console_auth", "enabled", "legacy_tls", "jsesp_cache", "java_web", "max_conns",
+                              "template", "tags", "expires")}
+            for site, _ in keys:
+                app.need_edit(u, site)
+            wanted = set(keys)
+            done = 0
+            with st.lock:
+                if action == "delete":
+                    before = len(st.bmcs)
+                    st.bmcs = [b for b in st.bmcs if bmc_key(b) not in wanted]
+                    done = before - len(st.bmcs)
+                elif action == "set":
+                    if not fields:
+                        raise ValidationError("Chưa chọn thay đổi")
+                    new = []
+                    for b in st.bmcs:
+                        if bmc_key(b) in wanted:
+                            nb = app.validate_bmc({**b, **fields}, bmc_key(b))
+                            for k in BMC_META[:3]:
+                                if k in b:
+                                    nb[k] = b[k]
+                            nb["updated_at"], nb["updated_by"] = now_iso(), u["name"]
+                            new.append(nb)
+                            done += 1
+                        else:
+                            new.append(b)
+                    st.bmcs = new
+                else:
+                    raise ValidationError("Thao tác không hợp lệ")
+                st.save("bmc.json")
+            for site in sorted({k[0] for k in keys}):
+                n = sum(1 for k in keys if k[0] == site)
+                st.audit(u["name"], f"bmc-batch-{action}", f"{n} BMC {fields if action == 'set' else ''}".strip(), site)
+            return {"ok": True, "changed": done}
+
+        def api_bmcs(self, method, site, port, u, sub=None):
+            if method == "GET" and site is None:
+                return self.send(200, app.bmc_views(u))
+            if method == "GET" and sub == "history":
+                if not app.can_view(u, site):
+                    raise PermissionError("Không có quyền xem site này")
+                p = str(to_port(port, "Cổng"))
+                pat = re.compile(r"(?<![0-9])" + p + r"(?![0-9])")
+                rows = [a for a in st.read_audit(5000) if a.get("site") == site and
+                        (a.get("action", "").startswith(("bmc-", "rollback")) or a.get("action") in ("import", "apply"))
+                        and pat.search(str(a.get("detail", "")))][:60]
+                return self.send(200, rows)
+            if method == "GET" and site == "export":
+                only = (self.query.get("site") or [""])[0]
+                rows = []
+                for b in app.bmc_views(u):
+                    if only and b["site"] != only:
+                        continue
+                    host = st.sites.get(b["site"], {}).get("domain", "")
+                    if host:
+                        b["link"] = f"https://{host}/" if b["port"] == 443 else f"https://{host}:{b['port']}/"
+                        b["console_link"] = f"https://{host}:{b['console_port']}/" if b.get("console_port") else ""
+                    rows.append(b)
+                name = f"bmc-{only or 'all'}-{now_iso()[:10]}.csv"
+                return self.send(200, export_csv(rows), "text/csv; charset=utf-8",
+                                 headers={"Content-Disposition": f'attachment; filename="{name}"'})
+            if method == "POST" and site == "bulk":
+                return self.send(200, self.bulk_add(u, self.body_json()))
+            if method == "POST" and site == "batch":
+                return self.send(200, self.batch(u, self.body_json()))
+            if method == "POST" and site is None:
+                data = self.body_json()
+                app.need_edit(u, str(data.get("site", "")))
+                with st.lock:
+                    b = app.validate_bmc(data)
+                    b["updated_at"], b["updated_by"] = now_iso(), u["name"]
+                    st.bmcs.append(b)
+                    st.save("bmc.json")
+                st.audit(u["name"], "bmc-add", f"{b['port']} -> {b['upstream']}", b["site"])
+                return self.send(201, b)
+            port = to_port(port, "Cổng")
+            app.need_edit(u, site)
+            with st.lock:
+                cur = st.get_bmc(site, port)
+                if not cur:
+                    return self.err(404, "Không có BMC này")
+                if method == "PUT":
+                    data = self.body_json()
+                    new_site = str(data.get("site") or site)
+                    app.need_edit(u, new_site)
+                    b = app.validate_bmc({**cur, **data, "site": new_site}, (site, port))
+                    for k in BMC_META[:3]:
+                        if k in cur:
+                            b[k] = cur[k]
+                    if "template" not in data and cur.get("template"):
+                        b["template"] = cur["template"]
+                    b["updated_at"], b["updated_by"] = now_iso(), u["name"]
+                    st.bmcs = [b if bmc_key(x) == (site, port) else x for x in st.bmcs]
+                    st.save("bmc.json")
+                    st.audit(u["name"], "bmc-edit", f"{port} -> {b['site']}:{b['port']} {b['upstream']}", site)
+                    return self.send(200, b)
+                if method == "DELETE":
+                    st.bmcs = [x for x in st.bmcs if bmc_key(x) != (site, port)]
+                    st.save("bmc.json")
+                    st.audit(u["name"], "bmc-delete", f"{port} -> {cur['upstream']}", site)
+                    return self.send(200, {"ok": True})
+            return self.err(404, "Không tìm thấy API")
+
+        # ------------------------------------------------------------ nguoi dung
+        def api_2fa(self, u):
+            """Nguoi dung tu bat / tat xac thuc 2 lop."""
+            data = self.body_json(10_000)
+            rec = st.users[u["name"]]
+            action = data.get("action")
+            with st.lock:
+                if action == "setup":
+                    rec["totp_pending"] = totp_new_secret()
+                    st.save("users.json")
+                    return self.send(200, {"secret": rec["totp_pending"], "uri": totp_uri(rec["totp_pending"], u["name"])})
+                if action == "enable":
+                    if not rec.get("totp_pending"):
+                        raise ValidationError("Bấm Bật 2FA lại để lấy mã mới")
+                    if not totp_check(rec["totp_pending"], data.get("code")):
+                        raise ValidationError("Mã 6 số không đúng (kiểm tra giờ trên điện thoại)")
+                    rec["totp_secret"] = rec.pop("totp_pending")
+                    st.save("users.json")
+                    st.audit(u["name"], "2fa-on")
+                    return self.send(200, {"ok": True})
+                if action == "disable":
+                    pw = str(data.get("password", ""))
+                    ok = check_password(rec, pw)
+                    if rec.get("source") == "ldap":
+                        try:
+                            ok = gw_ldap.authenticate(st.auth.get("ldap") or {}, u["name"], pw)["name"] == u["name"]
+                        except gw_ldap.LdapError:
+                            ok = False
+                    if not ok:
+                        raise ValidationError("Mật khẩu không đúng")
+                    rec.pop("totp_secret", None)
+                    rec.pop("totp_pending", None)
+                    st.save("users.json")
+                    st.audit(u["name"], "2fa-off")
+                    return self.send(200, {"ok": True})
+            raise ValidationError("Thao tác không hợp lệ")
+
+        @staticmethod
+        def user_view(n, r):
+            exp = r.get("expires") or ""
+            status = ("disabled" if r.get("disabled") else
+                      "expired" if exp and exp < dt.date.today().isoformat() else "active")
+            return {"name": n, "role": r.get("role"), "sites": r.get("sites") or [],
+                    "full_name": r.get("full_name", ""), "email": r.get("email", ""), "note": r.get("note", ""),
+                    "disabled": bool(r.get("disabled")), "expires": exp, "status": status,
+                    "must_change": bool(r.get("must_change")), "totp": bool(r.get("totp_secret")),
+                    "last_login": r.get("last_login"), "created_at": r.get("created_at", ""),
+                    "created_by": r.get("created_by", ""), "password_changed": r.get("password_changed", ""),
+                    "source": r.get("source", "local"), "ldap_groups": r.get("ldap_groups") or [],
+                    "sessions": app.user_sessions(n)}
+
+        @staticmethod
+        def profile_fields(data, name, me):
+            out = {"full_name": clean_text(data.get("full_name", ""), 80),
+                   "email": clean_text(data.get("email", ""), 120), "note": clean_text(data.get("note", ""), 200)}
+            exp = str(data.get("expires") or "").strip()
+            if exp and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", exp):
+                raise ValidationError("Ngày hết hạn dạng YYYY-MM-DD")
+            out["expires"] = exp
+            out["disabled"] = str(data.get("disabled", "")).lower() in ("1", "true", "on", "yes")
+            if name == me and (out["disabled"] or (exp and exp < dt.date.today().isoformat())):
+                raise ValidationError("Không thể tự khoá / cho hết hạn tài khoản của mình")
+            return out
+
+        def api_users(self, method, name, u, sub=None):
+            app.need_admin(u)
+            if method == "GET" and name is None:
+                return self.send(200, [self.user_view(n, r) for n, r in sorted(st.users.items())])
+            if name is not None and name not in st.users:
+                return self.err(404, "Không có tài khoản này")
+            if sub == "history" and method == "GET":
+                rows = [a for a in st.read_audit(3000) if a.get("user") == name
+                        and a.get("action") in ("login", "login-fail", "password", "2fa-on", "2fa-off")][:60]
+                return self.send(200, rows)
+            if sub == "logout" and method == "POST":
+                n = len(app.user_sessions(name))
+                app.drop_user_sessions(name)
+                st.audit(u["name"], "user-logout", f"{name} ({n} phiên)")
+                return self.send(200, {"ok": True, "dropped": n})
+            data = self.body_json(10_000) if method in ("POST", "PUT") else {}
+            if method == "POST" and name is None:
+                name = str(data.get("name", "")).strip()
+                if not RE_USER.match(name):
+                    raise ValidationError("Tên chỉ gồm chữ, số, . _ - (tối đa 32)")
+                if name in st.users:
+                    raise ValidationError("Tài khoản đã tồn tại")
+                is_ad = str(data.get("source", "")) == "ldap"
+                pw = str(data.get("password", ""))
+                if is_ad:
+                    name = name.lower()
+                    if name in st.users:
+                        raise ValidationError("Tài khoản đã tồn tại")
+                elif len(pw) < 10:
+                    raise ValidationError("Mật khẩu tối thiểu 10 ký tự")
+                rec = {**({"source": "ldap"} if is_ad else hash_password(pw)), **self.role_fields(data),
+                       **self.profile_fields(data, name, u["name"]), "created_at": now_iso(), "created_by": u["name"]}
+                if not is_ad and str(data.get("must_change", "1")).lower() in ("1", "true", "on", "yes"):
+                    rec["must_change"] = True
+                with st.lock:
+                    st.users[name] = rec
+                    st.save("users.json")
+                st.audit(u["name"], "user-add", f"{name} ({rec['role']})")
+                return self.send(201, {"ok": True})
+            if method == "PUT":
+                fields = self.role_fields(data)
+                if name == u["name"] and fields["role"] != "admin":
+                    raise ValidationError("Không thể tự bỏ quyền quản trị của mình")
+                prof = self.profile_fields(data, name, u["name"])
+                notes = []
+                with st.lock:
+                    rec = st.users[name]
+                    rec.update(fields)
+                    rec.update({k: v for k, v in prof.items() if k in data})  # chi doi o co gui len
+                    if data.get("password"):
+                        if rec.get("source") == "ldap":
+                            raise ValidationError("Tài khoản AD: mật khẩu đặt lại trên AD, không đặt trên web")
+                        if len(str(data["password"])) < 10:
+                            raise ValidationError("Mật khẩu tối thiểu 10 ký tự")
+                        rec.update(hash_password(str(data["password"])))
+                        rec["password_changed"] = now_iso()
+                        if str(data.get("must_change", "1")).lower() in ("1", "true", "on", "yes"):
+                            rec["must_change"] = True
+                        notes.append("đặt lại mật khẩu")
+                        app.drop_user_sessions(name)
+                    if str(data.get("reset_2fa", "")).lower() in ("1", "true", "on", "yes") and rec.get("totp_secret"):
+                        rec.pop("totp_secret", None)
+                        rec.pop("totp_pending", None)
+                        notes.append("tắt 2FA")
+                    if prof["disabled"] and "disabled" in data:
+                        app.drop_user_sessions(name)
+                        notes.append("khoá")
+                    st.save("users.json")
+                st.audit(u["name"], "user-edit", f"{name} ({fields['role']}" + (", " + ", ".join(notes) if notes else "") + ")")
+                return self.send(200, {"ok": True})
+            if method == "DELETE":
+                if name == u["name"]:
+                    raise ValidationError("Không thể tự xoá tài khoản của mình")
+                with st.lock:
+                    del st.users[name]
+                    st.save("users.json")
+                app.drop_user_sessions(name)
+                st.audit(u["name"], "user-delete", name)
+                return self.send(200, {"ok": True})
+            return self.err(404, "Không tìm thấy API")
+
+        @staticmethod
+        def role_fields(data):
+            role = data.get("role", "viewer")
+            if role not in ROLES:
+                raise ValidationError("Vai trò không hợp lệ")
+            sites = [s for s in (data.get("sites") or []) if s in st.sites]
+            return {"role": role, "sites": [] if role == "admin" else sites}
+
+        # ------------------------------------------------------------ tong hop
+        def overview(self, u):
+            sites = [app.site_status(k) for k in app.visible_sites(u)]
+            views = [v for v in app.bmc_views(u) if v["enabled"]]
+            auth = {"ok": 0, "deny": 0, "error": 0}
+            denied = []
+            for v in views:
+                s = v["auth_stats"] or {}
+                for k in auth:
+                    auth[k] += s.get(k, 0)
+                if s.get("deny"):
+                    denied.append({"site": v["site"], "port": v["port"], "note": v["note"],
+                                   "deny": s["deny"]})
+            down = [{"site": v["site"], "port": v["port"], "upstream": v["upstream"], "note": v["note"]}
+                    for v in views if (v["health"] or {}).get("web", {}).get("up") is False]
+            return {
+                "sites": sites, "bmcs": len(views),
+                "checked": sum(1 for v in views if v["health"]), "down": down,
+                "open": sum(1 for v in views if not v["auth"] or (v["console_port"] and not v["console_auth"])),
+                "auth": auth, "top_denied": sorted(denied, key=lambda x: -x["deny"])[:6],
+                "cert": cert_info(st.settings["cert_file"]), "started": app.started,
+            }
+
+        def warnings(self, u):
+            w = []
+            if st.db and st.db_error and u["role"] == "admin":
+                w.append({"level": "danger", "site": "",
+                          "text": f"Mất kết nối cơ sở dữ liệu {st.db.describe()}: {st.db_error[:160]}"})
+            for k in app.visible_sites(u):
+                s = app.site_status(k)
+                if not s["token_set"]:
+                    w.append({"level": "warn", "site": k, "text": "Chưa tạo token cho agent"})
+                elif not s["online"]:
+                    w.append({"level": "danger", "site": k,
+                              "text": "Agent mất liên lạc" + (f" từ {s['last_seen']}" if s["last_seen"] else " (chưa từng kết nối)")})
+                if s["phase"] == "failed":
+                    w.append({"level": "danger", "site": k, "text": "Lần áp dụng gần nhất bị lỗi, đã khôi phục"})
+                if s["online"] and s["target"] and not s["traefik"]["reachable"]:
+                    w.append({"level": "danger", "site": k,
+                              "text": "Traefik không chạy hoặc API Traefik không phản hồi"})
+                if s["traefik"]["errors"]:
+                    w.append({"level": "danger", "site": k, "text": f"{s['traefik']['errors']} router Traefik lỗi"})
+                for x in s["warnings"]:
+                    w.append({**x, "site": k})
+            for b in st.bmcs:
+                if not app.can_view(u, b["site"]) or not b.get("enabled", True):
+                    continue
+                if not b["auth"]:
+                    w.append({"level": "danger", "site": b["site"], "text": f"Cổng {b['port']} không có xác thực"})
+                if b.get("console_port") and not b["console_auth"]:
+                    w.append({"level": "danger", "site": b["site"],
+                              "text": f"Console {b['console_port']} (BMC {b['port']}) không có xác thực"})
+                exp = b.get("expires") or ""
+                if exp and b.get("enabled", True):
+                    days = (dt.date.fromisoformat(exp) - dt.date.today()).days if re.fullmatch(r"\d{4}-\d{2}-\d{2}", exp) else 99
+                    if days < 0:
+                        w.append({"level": "warn", "site": b["site"],
+                                  "text": f"BMC {b['port']} hết hạn sử dụng {exp} - sẽ tắt ở lần Áp dụng"})
+                    elif days <= 7:
+                        w.append({"level": "info", "site": b["site"],
+                                  "text": f"BMC {b['port']} hết hạn sau {days} ngày ({exp})"})
+                if b.get("tcp_ports") and not b.get("tcp_allow_ips"):
+                    ports_str = ", ".join(str(t["proxy"] if isinstance(t, dict) else t) for t in b["tcp_ports"])
+                    w.append({"level": "danger", "site": b["site"],
+                              "text": f"Console Java của BMC {b['port']} mở TCP cho mọi IP "
+                                      f"({ports_str}) - hãy khai IP được phép"})
+            order = {"danger": 0, "warn": 1, "info": 2}
+            return sorted(w, key=lambda x: order.get(x["level"], 3))
+
+    return Handler
+
+
+def serve(store):
+    if not store.users:
+        sys.exit("Chưa có tài khoản. Chạy: python3 bmcproxy.py adduser admin")
+    cfg = store.cfg
+    app = App(store)
+    httpd = ThreadingServer((cfg["listen_host"], cfg["listen_port"]), make_handler(app))
+    httpd.ssl_ctx = None
+    scheme = "http"
+    if cfg.get("tls_cert"):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(cfg["tls_cert"], cfg["tls_key"])
+        httpd.ssl_ctx = ctx  # bat tay TLS lam trong Handler.setup (moi ket noi 1 luong)
+        scheme = "https"
+    print(f"bmcproxy controller {VERSION}: {scheme}://{cfg['listen_host']}:{cfg['listen_port']}/"
+          + (f" | dữ liệu: {store.db.describe()}" if store.db else " | dữ liệu: file JSON"), flush=True)
+    httpd.serve_forever()

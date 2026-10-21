@@ -1,0 +1,10 @@
+{
+  "listen_host": "0.0.0.0",
+  "listen_port": 9443,
+  "tls_cert": "/etc/nginx/ssl/longvan-vn-2027.crt",
+  "tls_key": "/etc/nginx/ssl/longvan-vn-2027.key",
+  "data_dir": "data",
+  "backup_dir": "backups",
+  "zabbix_token": "",
+  "agent_offline_after": 45
+}

@@ -1,0 +1,19 @@
+[Unit]
+Description=Treafix Proxy BB - controller (giao dien web quan ly nhieu site)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bmcproxy
+ExecStart=/usr/bin/python3 /opt/bmcproxy/bmcproxy.py serve -c /opt/bmcproxy/config.json
+Restart=always
+RestartSec=3
+User=bmcproxy
+Group=bmcproxy
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/bmcproxy/data /opt/bmcproxy/backups
+
+[Install]
+WantedBy=multi-user.target

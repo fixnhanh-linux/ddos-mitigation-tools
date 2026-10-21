@@ -1,0 +1,27 @@
+{
+  "site": "hn",
+  "controller_url": "https://bmc-gw.longvan.net:9443",
+  "token": "<token lấy từ trang Site của web>",
+  "verify_tls": true,
+  "poll_interval": 10,
+
+  "auth_listen_host": "127.0.0.1",
+  "auth_listen_port": 9444,
+
+  "traefik_static_file": "/etc/traefik/traefik.yml",
+  "traefik_dynamic_dir": "/etc/traefik/dynamic",
+  "traefik_restart_cmd": ["systemctl", "restart", "traefik"],
+  "traefik_stop_cmd": ["systemctl", "stop", "traefik"],
+  "traefik_api": "http://127.0.0.1:18080",
+  "entrypoint_host": "",
+  "verify_wait": 15,
+  "verify_ports": true,
+
+  "nginx_conf_dir": "/etc/nginx/conf.d",
+  "nginx_test_cmd": ["nginx", "-t"],
+  "nginx_reload_cmd": ["systemctl", "reload", "nginx"],
+
+  "data_dir": "agent-data",
+  "health_interval": 60,
+  "health_timeout": 3
+}
