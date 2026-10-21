@@ -17,6 +17,18 @@ import urllib.error
 import urllib.request
 
 VERSION = "2.0.0"
+
+
+def _read_build():
+    """Ma ban dong goi (file BUILD do tools/build_packages.py ghi vao goi). Chay tu ma nguon -> "dev"."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "BUILD"), encoding="utf-8") as f:
+            return f.read().strip()[:64] or "dev"
+    except OSError:
+        return "dev"
+
+
+BUILD = _read_build()
 MARK = "# Managed by bmcproxy"
 
 RE_HOST = (r"(?:\d{1,3}(?:\.\d{1,3}){3}|[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -61,6 +73,7 @@ BMC_DEFAULTS = {
 
 KVM_PATH = "/__kvm"          # duong dan noVNC tren cong web cua BMC
 KVM_CTL_PATH = "/__kvmctl"   # trang cho / trang thai (agent tra loi)
+GUEST_PATH = "/__bmcgw/guest"  # link tam cho khach: ?t=<ma> -> agent dat cookie bmcgw_guest
 KVM_PORT_BASE = 40000        # container lang nghe 127.0.0.1:(40000 + cong BMC)
 KVM_MAX_BMC_PORT = 65535 - KVM_PORT_BASE
 

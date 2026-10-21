@@ -4,7 +4,7 @@ import hashlib
 import json
 import urllib.parse
 
-from gw_common import (BMC_DEFAULTS, KVM_CTL_PATH, KVM_PATH, kvm_local_port, limit_local_port, to_yaml,
+from gw_common import (BMC_DEFAULTS, GUEST_PATH, KVM_CTL_PATH, KVM_PATH, kvm_local_port, limit_local_port, to_yaml,
                        upstream_host_port)
 
 # File .jnlp: duong dan *.jnlp (AMI, iDRAC, iLO...) hoac Supermicro /cgi/url_redirect.cgi?url_type=jwsk
@@ -40,7 +40,7 @@ DEFAULT_PARAMS = {
 
 
 # Tang khi doi cach sinh file Traefik -> rev doi -> site hien "cho ap dung" de agent sinh lai file
-RENDER_VERSION = 9
+RENDER_VERSION = 10
 
 
 def release_rev(domain, settings, bmcs, dashboard=None):
@@ -93,6 +93,8 @@ def expected_routers(release):
             names.append(n + "-jar")
         if b.get("java_web"):
             names.append(n + "-kvm")
+        if b["auth"]:
+            names.append(n + "-guest")
     if dashboard_of(release):
         names.append("bmc-dashboard")
     return names
@@ -279,6 +281,15 @@ def render_bmc(b, params):
         services[f"{name}-jnlp"] = {"loadBalancer": {
             "servers": [{"url": f"http://{params['auth_host']}:{params['auth_port']}"}],
             "passHostHeader": True}}
+    if b["auth"]:
+        # Link tam cho khach: agent kiem tra ma, dat cookie bmcgw_guest roi chuyen vao trang BMC
+        middlewares[f"{name}-tag"] = {"headers": {"customRequestHeaders": {"X-Bmcproxy-Bmc": str(b["port"])}}}
+        routers[f"{name}-guest"] = {
+            "entryPoints": [ep_name(b["port"])], "rule": f"Path(`{GUEST_PATH}`)",
+            "service": f"{name}-agent", "priority": 3200, "tls": {},
+            "middlewares": ["bmc-headers", f"{name}-tag"]}
+        services[f"{name}-agent"] = {"loadBalancer": {
+            "servers": [{"url": f"http://{params['auth_host']}:{params['auth_port']}"}], "passHostHeader": True}}
     if b.get("java_web"):
         # noVNC cua container console Java (chi nghe 127.0.0.1) - cung xac thuc voi cong web
         middlewares[f"{name}-kvm-strip"] = {"stripPrefix": {"prefixes": [KVM_PATH]}}

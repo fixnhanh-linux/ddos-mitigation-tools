@@ -11,6 +11,7 @@ moi file .py nam canh bmcproxy.py + install.sh, web/ va kvm/ la thu muc con -> s
 binh thuong, khong phai doi duong dan.
 """
 
+import hashlib
 import io
 import os
 import shutil
@@ -26,7 +27,7 @@ from gw_common import VERSION  # noqa: E402
 COMMON = ["bmcproxy.py", "common/gw_common.py", "deploy/install.sh", "docs/HUONG-DAN-CAI-DAT.md"]
 PACKAGES = {
     "web": {
-        "files": COMMON + ["controller/gw_controller.py", "controller/gw_db.py", "controller/gw_ldap.py",
+        "files": COMMON + ["controller/gw_controller.py", "controller/gw_db.py", "controller/gw_ldap.py", "controller/gw_notify.py",
                            "controller/gw_templates.py", "common/gw_render.py", "common/gw_auth.py",
                            "deploy/systemd/bmcproxy.service", "deploy/config.example.json"],
         "dirs": {"controller/web": "web"},
@@ -105,8 +106,15 @@ def build(kind, spec, out_dir):
         entries.append((f"{top}/{name}", read_lf(src), mode))
     for rel, path in spec.get("extra", lambda: [])():  # vd goi agent nam trong goi web
         entries.append((f"{top}/{rel}", open(path, "rb").read(), 0o644))
+    # Ma ban = phien ban + bam noi dung code: agent bao ma nay, web so voi goi dang co -> nut "Cap nhat agent"
+    digest = hashlib.sha256()
+    for name, data, _ in sorted(entries):
+        if name.endswith((".py", ".sh")) or "/web/" in name or "/kvm/" in name:
+            digest.update(name.encode() + b"\0" + data)
+    build_id = f"{VERSION}-{digest.hexdigest()[:10]}"
     entries.append((f"{top}/README.txt", spec["readme"].format(v=VERSION).encode("utf-8"), 0o644))
     entries.append((f"{top}/VERSION", f"{VERSION}\n".encode(), 0o644))
+    entries.append((f"{top}/BUILD", f"{build_id}\n".encode(), 0o644))
 
     tgz = os.path.join(out_dir, f"{top}-{VERSION}.tar.gz")
     with tarfile.open(tgz, "w:gz") as tar:

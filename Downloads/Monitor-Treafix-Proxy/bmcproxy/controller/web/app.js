@@ -215,6 +215,7 @@ const PAGES = {
   sites: { title: "Site", sub: "Mỗi site là một server Traefik chạy agent" },
   bmcs: { title: "BMC", sub: "Mỗi BMC được mở qua một cổng riêng trên server Traefik của site" },
   traefik: { title: "Traefik", sub: "Router đang chạy trên từng server" },
+  access: { title: "Truy cập BMC", sub: "Ai mở BMC / console nào, lúc nào, từ đâu · link tạm cho khách" },
   audit: { title: "Nhật ký", sub: "Ai đã làm gì, lúc nào" },
   backups: { title: "Sao lưu", sub: "Tự sao lưu trước mỗi lần nhập, khôi phục, xoá site" },
   users: { title: "Người dùng", sub: "Tài khoản đăng nhập giao diện và quyền theo site" },
@@ -285,6 +286,7 @@ function route() {
   if (page === "traefik") loadTraefik();
   if (page === "backups") loadBackups();
   if (page === "audit") loadAudit();
+  if (page === "access") loadAccess();
   if (page === "users") loadUsers();
   if (page === "settings") renderSettings();
 }
@@ -366,7 +368,7 @@ async function refreshAll() {
 
 function fillSiteSelects() {
   const opts = state.sites.map((s) => `<option value="${esc(s.key)}">${esc(s.label)} (${esc(s.key)})</option>`).join("");
-  for (const id of ["#filter-site", "#audit-site"]) {
+  for (const id of ["#filter-site", "#audit-site", "#access-site"]) {
     const sel = $(id);
     const cur = sel.value;
     sel.innerHTML = '<option value="">Mọi site</option>' + opts;
@@ -481,6 +483,8 @@ function renderSites() {
         <div class="row"><span>Agent</span><span>${s.online ? `trực tuyến · ${esc(s.hostname || "")} ${s.remote_ip ? `(${esc(s.remote_ip)})` : ""}`
         : s.token_set ? `<b class="tag bad">mất liên lạc</b> ${s.last_seen ? `từ ${esc(fmtTs(s.last_seen))}` : "chưa từng kết nối"}` : '<span class="tag warn">chưa có token</span>'}</span></div>
         <div class="row"><span>Traefik</span><span>${s.traefik.reachable ? `v${esc(s.traefik.version)} · ${s.traefik.entrypoints} cổng` : "—"}</span></div>
+        ${s.online ? `<div class="row"><span>Bản agent</span><span class="mono">${esc(s.agent_build || s.agent_version || "?")}
+          ${agentOutdated(s) ? `<span class="tag warn" title="Web có bản ${esc(s.agent_pkg_build)}">có bản mới</span>` : ""}</span></div>` : ""}
         ${s.online && s.sysinfo && s.sysinfo.os ? `<div class="row"><span>Server</span><span>${sysLine(s.sysinfo)}</span></div>` : ""}
         <div class="row"><span>Bản cấu hình</span><span class="mono">${esc(s.applied_rev || "—")}${s.desired_rev !== s.applied_rev ? ` → ${esc(s.desired_rev)}` : ""}</span></div>
         <div class="row"><span>Áp dụng gần nhất</span><span>${rep.at ? `${rep.ok ? '<span class="tag ok">thành công</span>' : '<span class="tag bad">lỗi</span>'} ${esc(fmtTs(rep.at))}` : "—"}
@@ -507,6 +511,7 @@ function renderSites() {
           ${edit ? `<button class="btn" data-site-act="import" data-site="${k}" title="Đọc config nginx cũ trên server">${SITE_ICO.import}Nhập nginx</button>` : ""}
           <button class="btn" data-site-act="history" data-site="${k}">${SITE_ICO.clock}Lịch sử${s.history_count ? `<span class="count">${s.history_count}</span>` : ""}</button>
           ${isAdmin() && s.online ? `<button class="btn" data-site-act="server" data-site="${k}" title="Log agent / Traefik, restart từ xa">${SITE_ICO.server}Server</button>` : ""}
+          ${isAdmin() && agentOutdated(s) ? `<button class="btn chip-warn" data-site-act="update" data-site="${k}" title="Agent tự tải bản ${esc(s.agent_pkg_build)} từ web, cài, khởi động lại">${SITE_ICO.import}Cập nhật agent</button>` : ""}
         </div>
       </footer></article>`;
   }).join("");
@@ -540,6 +545,7 @@ $("#site-grid").addEventListener("click", async (e) => {
       case "diagnose": return siteDiagnose(s);
       case "history": return siteHistory(s);
       case "server": return siteServer(s);
+      case "update": return siteUpdateAgent(s);
       case "install": return showInstall(s);
       case "edit": return editSite(s);
       case "token":
@@ -860,6 +866,8 @@ function openDrawer(b) {
   $("#btn-bmc-check").classList.toggle("hidden", !b || !editable);
   $("#btn-bmc-history").classList.toggle("hidden", !b);
   $("#btn-bmc-clone").classList.toggle("hidden", !b || !editable);
+  $("#btn-bmc-guest").classList.toggle("hidden", !b || !editable || !b.auth);
+  $("#btn-bmc-access").classList.toggle("hidden", !b || state.me.role === "viewer");
   $("#btn-save-bmc").classList.toggle("hidden", !editable);
   $("#drawer").classList.add("open");
   $("#drawer").setAttribute("aria-hidden", "false");
@@ -1145,6 +1153,110 @@ $("#btn-audit-csv").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 });
 
+// ------------------------------------------------------------------ Truy cập BMC
+const ACCESS_KIND = { web: ["", "trang BMC"], console: ["info", "console"], "guest-open": ["warn", "khách mở link"] };
+let accessRows = [];
+["#access-site", "#access-kind"].forEach((id) => $(id).addEventListener("input", renderAccess));
+$("#access-q").addEventListener("input", renderAccess);
+async function loadAccess() {
+  const [rows] = await Promise.all([api("GET", "access?limit=3000"), loadGuests()]);
+  accessRows = rows;
+  renderAccess();
+}
+function accessFiltered() {
+  const site = $("#access-site").value, kind = $("#access-kind").value, q = $("#access-q").value.trim().toLowerCase();
+  return accessRows.filter((a) => (!site || a.site === site)
+    && (!kind || (kind === "guest" ? /^khách/.test(a.user) || a.kind === "guest-open" : a.kind === kind && !/^khách/.test(a.user)))
+    && (!q || [a.user, a.ip, a.port, a.note, a.path].some((x) => String(x ?? "").toLowerCase().includes(q))));
+}
+function renderAccess() {
+  const list = accessFiltered();
+  $("#access-count").textContent = `${list.length} / ${accessRows.length} lượt`;
+  $("#access-list").innerHTML = list.slice(0, 1000).map((a) => {
+    const [cls, label] = ACCESS_KIND[a.kind] || ["", a.kind];
+    return `<tr><td class="mono">${esc(fmtTs(a.ts))}</td>
+      <td>${/^khách/.test(a.user) ? `<span class="tag warn">${esc(a.user)}</span>` : esc(a.user)}</td>
+      <td class="mono">${esc(a.ip)}</td><td><span class="tag">${esc(siteLabel(a.site))}</span></td>
+      <td><b class="mono">${esc(a.port)}</b>${a.note ? `<div class="cell-sub">${esc(a.note)}</div>` : ""}</td>
+      <td><span class="tag ${cls}" title="${esc(a.path || "")}">${label}</span></td></tr>`;
+  }).join("") || '<tr><td colspan="6" class="hint" style="padding:24px">Chưa có lượt truy cập nào (agent cần bản mới).</td></tr>';
+}
+$("#btn-access-csv").addEventListener("click", () => {
+  const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [["Thời điểm", "Người dùng", "IP", "Site", "Cổng BMC", "Ghi chú BMC", "Loại", "Đường dẫn"].map(cell).join(",")]
+    .concat(accessFiltered().map((a) => [fmtTs(a.ts), a.user, a.ip, a.site, a.port, a.note, (ACCESS_KIND[a.kind] || [0, a.kind])[1], a.path].map(cell).join(",")));
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
+  link.download = `truy-cap-bmc-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+});
+
+const GUEST_ST = { active: '<span class="tag ok">đang dùng được</span>', expired: '<span class="tag">hết hạn</span>',
+  revoked: '<span class="tag bad">đã thu hồi</span>' };
+function guestRows(list, withBmc = true) {
+  return list.map((g) => `<tr>${withBmc ? `<td><span class="tag">${esc(siteLabel(g.site))}</span> <b class="mono">${g.port}</b></td>` : ""}
+    <td>${esc(g.label || "—")}</td>
+    <td class="mono nowrap">${esc(fmtTs(g.expires).slice(withBmc ? 0 : 5, 16))}${g.status === "active" ? `<div class="cell-sub">còn ${g.left_minutes >= 120 ? Math.round(g.left_minutes / 60) + " giờ" : g.left_minutes + " phút"}</div>` : ""}</td>
+    ${withBmc ? `<td>${esc(g.created_by || "")}<div class="cell-sub">${esc(fmtTs(g.created_at || ""))}</div></td>` : ""}
+    <td>${GUEST_ST[g.status] || ""}${g.revoked_by ? `<div class="cell-sub">bởi ${esc(g.revoked_by)}</div>` : ""}</td>
+    <td style="text-align:right">${g.status === "active" && canEdit(g.site) ? `<button class="btn small danger-ghost" data-guest-revoke="${esc(g.id)}">Thu hồi</button>` : ""}</td></tr>`).join("");
+}
+async function loadGuests() {
+  const list = await api("GET", "guests");
+  const active = list.filter((g) => g.status === "active").length;
+  $("#nav-guest-count").textContent = active || "";
+  $("#guest-list").innerHTML = guestRows(list.slice(0, 50))
+    || '<tr><td colspan="6" class="hint" style="padding:18px">Chưa có link khách nào.</td></tr>';
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-guest-revoke]");
+  if (!b) return;
+  if (!await confirmBox("Thu hồi link khách", "Link sẽ hết dùng được trong ~10 giây (khi agent đồng bộ). Khách đang mở trang BMC cũng bị chặn.", "Thu hồi")) return;
+  try {
+    await api("DELETE", `guests/${encodeURIComponent(b.dataset.guestRevoke)}`);
+    toast("Đã thu hồi link");
+    if (state.page === "access") loadAccess();
+    const row = b.closest("tr");
+    if (row && row.closest("#info-body")) row.remove();
+  } catch (err) { toast(err.message, true); }
+});
+
+$("#btn-bmc-guest").addEventListener("click", async () => {
+  const b = editingBmc();
+  if (!b) return;
+  const old = await api("GET", `guests?site=${encodeURIComponent(b.site)}&port=${b.port}`).catch(() => []);
+  formBox(`Link khách · BMC ${b.port} (${siteLabel(b.site)})`, [
+    { type: "html", html: `<p class="hint">Khách mở link là vào thẳng trang BMC này, <b>không cần tài khoản</b>, đến khi hết hạn hoặc bạn thu hồi.
+      Link chỉ dùng cho đúng BMC này. Mỗi lần khách mở được ghi ở trang <b>Truy cập BMC</b>.</p>` },
+    { type: "select", name: "hours", label: "Thời hạn", value: "4", span: false,
+      options: [["1", "1 giờ"], ["2", "2 giờ"], ["4", "4 giờ"], ["8", "8 giờ"], ["24", "1 ngày"], ["72", "3 ngày"], ["168", "7 ngày"]] },
+    { name: "label", label: "Ghi chú (khách là ai)", placeholder: "vd KH 19427011 - anh Minh", span: false },
+    ...(old.length ? [{ type: "html", html: `<h3 class="mt">Link đã cấp cho BMC này</h3><div class="table-wrap"><table class="table"><tbody>${guestRows(old.slice(0, 10), false)}</tbody></table></div>` }] : []),
+  ], async (d) => {
+    const r = await api("POST", "guests", { site: b.site, port: b.port, hours: Number(d.hours), label: d.label });
+    setTimeout(() => infoBox("Đã tạo link khách", `<p class="hint">Gửi link này cho khách. <b>Link chỉ hiện 1 lần</b> - sao chép ngay.
+        Hết hạn <b>${esc(fmtTs(r.expires))}</b>.</p>
+      <div class="code-row"><pre class="code">${esc(r.url)}</pre><button type="button" class="btn icon-btn copy-btn" data-copy="${esc(r.url)}" title="Sao chép">⧉</button></div>
+      <p class="hint">${r.site_online ? "Link dùng được sau ~10 giây (agent đồng bộ)." : "<b>Agent của site đang mất liên lạc</b> - link chỉ dùng được khi agent kết nối lại."}
+        Link báo <i>404</i>: bấm <b>Áp dụng</b> site 1 lần (bản cập nhật thêm đường dẫn link khách vào Traefik).</p>`), 50);
+  }, "Tạo link");
+});
+
+$("#btn-bmc-access").addEventListener("click", async () => {
+  const b = editingBmc();
+  if (!b) return;
+  try {
+    const rows = await api("GET", `access?site=${encodeURIComponent(b.site)}&port=${b.port}&limit=200`);
+    infoBox(`Truy cập BMC ${b.port} · ${siteLabel(b.site)}`, rows.length
+      ? `<div class="table-wrap"><table class="table"><thead><tr><th>Thời điểm</th><th>Người dùng</th><th>IP</th><th>Loại</th></tr></thead><tbody>${rows.map((a) => {
+        const [cls, label] = ACCESS_KIND[a.kind] || ["", a.kind];
+        return `<tr><td class="mono">${esc(fmtTs(a.ts))}</td><td>${esc(a.user)}</td><td class="mono">${esc(a.ip)}</td><td><span class="tag ${cls}">${label}</span></td></tr>`;
+      }).join("")}</tbody></table></div>`
+      : '<p class="hint">Chưa có lượt truy cập nào được ghi (agent của site cần bản mới - Site → Cập nhật agent).</p>');
+  } catch (err) { toast(err.message, true); }
+});
+
 // ------------------------------------------------------------------ Sao lưu
 const BLABEL = { import: "Trước khi nhập nginx", "before-restore": "Trước khi khôi phục", "site-delete": "Trước khi xoá site" };
 async function loadBackups() {
@@ -1351,8 +1463,62 @@ $("#btn-ldap-test").addEventListener("click", async () => {
   } catch (err) { out.innerHTML = `<p class="form-msg error">✗ ${esc(err.message)}</p>`; }
 });
 
+async function loadNotify() {
+  const f = $("#notify-form");
+  f.classList.toggle("hidden", !isAdmin());
+  if (!isAdmin()) return;
+  const c = await api("GET", "notify");
+  f.tg_enabled.checked = c.telegram.enabled; f.tg_chat_id.value = c.telegram.chat_id || "";
+  f.tg_bot_token.value = ""; f.tg_bot_token.placeholder = c.telegram.has_bot_token ? "đã lưu - để trống = giữ nguyên" : "123456789:ABC…";
+  f.em_enabled.checked = c.email.enabled;
+  ["host", "port", "security", "user", "from", "to"].forEach((k) => { f["em_" + k].value = c.email[k] ?? ""; });
+  f.em_password.value = ""; f.em_password.placeholder = c.email.has_password ? "đã lưu - để trống = giữ nguyên" : "";
+  f.bmc_down_minutes.value = c.bmc_down_minutes; f.prefix.value = c.prefix;
+  $("#notify-events").innerHTML = `<b>Báo khi</b><div class="notify-events">${Object.entries(c.event_names).map(([k, label]) =>
+    `<label class="check-line"><input type="checkbox" data-event="${k}" ${c.events[k] ? "checked" : ""}> ${esc(label)}</label>`).join("")}</div>`;
+  const on = c.telegram.enabled || c.email.enabled;
+  $("#notify-state").className = "tag " + (on ? "ok" : "");
+  $("#notify-state").textContent = on ? [c.telegram.enabled && "Telegram", c.email.enabled && "email"].filter(Boolean).join(" + ") : "đang tắt";
+  $("#notify-sent").innerHTML = (c.sent || []).length ? `<details><summary>${c.sent.length} tin gửi gần nhất</summary>
+    <div class="table-wrap"><table class="table"><tbody>${c.sent.map((x) => `<tr><td class="mono">${esc(fmtTs(x.at))}</td><td>${esc(x.title)}</td>
+      <td class="cell-sub">${esc(Object.entries(x.result || {}).map(([k, v]) => `${k}: ${v}`).join(" · "))}</td></tr>`).join("")}</tbody></table></div></details>` : "";
+}
+function notifyBody() {
+  const f = $("#notify-form");
+  const b = {
+    telegram: { enabled: f.tg_enabled.checked, chat_id: f.tg_chat_id.value },
+    email: { enabled: f.em_enabled.checked, host: f.em_host.value, port: Number(f.em_port.value) || 587, security: f.em_security.value,
+      user: f.em_user.value, from: f.em_from.value, to: f.em_to.value },
+    events: Object.fromEntries($$("[data-event]", f).map((x) => [x.dataset.event, x.checked])),
+    bmc_down_minutes: Number(f.bmc_down_minutes.value) || 3, prefix: f.prefix.value,
+  };
+  if (f.tg_bot_token.value) b.telegram.bot_token = f.tg_bot_token.value;
+  if (f.em_password.value) b.email.password = f.em_password.value;
+  return b;
+}
+$("#notify-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = $("#notify-msg");
+  try {
+    await api("PUT", "notify", notifyBody());
+    msg.className = "form-msg ok"; msg.textContent = "Đã lưu.";
+    await loadNotify();
+  } catch (err) { msg.className = "form-msg error"; msg.textContent = err.message; }
+});
+$("#btn-notify-test").addEventListener("click", async () => {
+  const msg = $("#notify-msg");
+  msg.className = "form-msg"; msg.textContent = "Đang gửi thử…";
+  try {
+    const r = await api("POST", "notify/test", notifyBody());
+    const bad = Object.entries(r).filter(([, v]) => v !== "ok");
+    msg.className = "form-msg " + (bad.length ? "error" : "ok");
+    msg.textContent = Object.entries(r).map(([k, v]) => `${k}: ${v === "ok" ? "đã gửi ✓" : v}`).join(" · ");
+  } catch (err) { msg.className = "form-msg error"; msg.textContent = err.message; }
+});
+
 function renderSettings() {
   renderTwofa();
+  loadNotify().catch((err) => { $("#notify-msg").textContent = err.message; });
   loadLdap().catch((err) => { $("#ldap-msg").textContent = err.message; });
   $("#password-form").classList.toggle("hidden", state.me.source === "ldap");
   const r = state.settings;
@@ -1766,6 +1932,23 @@ function sysLine(x) {
 }
 
 /** Gui lenh cho agent roi cho ket qua (agent hoi web moi 10 giay). */
+const agentOutdated = (s) => s.online && s.agent_pkg_build && s.agent_pkg_build !== "?" && s.agent_build !== s.agent_pkg_build;
+
+async function siteUpdateAgent(s) {
+  if (!await confirmBox("Cập nhật agent", `Agent ở ${s.label} (${s.agent_build || "?"}) sẽ tải bản ${s.agent_pkg_build} từ web,
+    chạy thử, sao lưu bản cũ rồi tự khởi động lại (~10 giây). Traefik và BMC không bị gián đoạn.`, "Cập nhật")) return;
+  infoBox(`Cập nhật agent · ${s.label}`, '<p class="hint" id="upd-wait">Đang gửi lệnh tới agent…</p>');
+  try {
+    const r = await siteCommandWait(s, "update_agent", "action", (i) => {
+      const w = $("#upd-wait");
+      if (w) w.textContent = `Agent đang tải và cài bản mới… ${2 * (i + 1)} giây`;
+    });
+    $("#info-body").innerHTML = `<p class="form-msg ${r.ok ? "ok" : "error"}">${r.ok ? "✓" : "✗"} ${esc(r.output || "")}</p>
+      ${r.ok ? '<p class="hint">Sau ~10 giây thẻ site hiện bản mới. Bản cũ được giữ trên server (3 bản gần nhất).</p>' : ""}`;
+    setTimeout(() => refreshAll().catch(() => { }), 12000);
+  } catch (err) { const w = $("#upd-wait"); if (w) w.textContent = err.message; }
+}
+
 async function siteCommandWait(s, cmd, kind, onWait) {
   const before = await api("GET", `sites/${s.key}/${kind}`).catch(() => ({}));
   await api("POST", `sites/${s.key}/command`, { name: cmd });
@@ -2035,7 +2218,8 @@ $("#btn-bmc-clone").addEventListener("click", () => {
   $("#drawer-title").textContent = `Nhân bản từ BMC ${b.port}`;
   $("#drawer-sub").textContent = "Đổi cổng proxy + IP BMC (ô IP ở phần Mẫu → Điền theo mẫu), rồi Lưu để tạo BMC mới";
   $("#drawer-links").classList.add("hidden");
-  ["btn-delete", "btn-bmc-check", "btn-bmc-history", "btn-bmc-clone"].forEach((id) => $("#" + id).classList.add("hidden"));
+  ["btn-delete", "btn-bmc-check", "btn-bmc-history", "btn-bmc-clone", "btn-bmc-guest", "btn-bmc-access"]
+    .forEach((id) => $("#" + id).classList.add("hidden"));
   setTimeout(() => f.port.focus(), 60);
 });
 

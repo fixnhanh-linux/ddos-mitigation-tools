@@ -200,6 +200,7 @@ install_web() {
   id bmcproxy >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin bmcproxy
   mkdir -p "$APP/data" "$APP/backups" /etc/bmcproxy/certs
   cp "$SRC"/bmcproxy.py "$SRC"/gw_*.py "$APP/"
+  [ -f "$SRC/BUILD" ] && cp "$SRC/BUILD" "$APP/BUILD"
   rm -rf "$APP/web" && cp -r "$SRC/web" "$APP/web"
   if [ -d "$SRC/agent-package" ]; then  # goi agent cho lenh "cai agent 1 dong" tren web
     rm -rf "$APP/agent-package" && cp -r "$SRC/agent-package" "$APP/agent-package"
@@ -352,6 +353,7 @@ install_agent() {
     [ -f "$SRC/$f" ] || die "Gói thiếu $f - dùng gói bmc-gateway-agent"
     cp "$SRC/$f" "$APP/"
   done
+  [ -f "$SRC/BUILD" ] && [ "$SRC" != "$APP" ] && cp "$SRC/BUILD" "$APP/BUILD"  # ma ban: web so de hien "Cap nhat agent"
   if [ -d "$SRC/kvm" ] && [ "$SRC" != "$APP" ]; then
     rm -rf "$APP/kvm" && cp -r "$SRC/kvm" "$APP/kvm"
   fi

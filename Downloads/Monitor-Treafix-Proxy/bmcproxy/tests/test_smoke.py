@@ -142,7 +142,7 @@ class WebTest(unittest.TestCase):
             self.assertIn(s, (401, 429))
             # moi lan sai doi IP gia: xoa khoa theo IP de chi con khoa theo tai khoan
             import gc
-            app = app or next(o for o in gc.get_objects() if isinstance(o, gw_controller.App))
+            app = app or next(o for o in gc.get_objects() if isinstance(o, gw_controller.App) and o.store is self.st)
             app.fails.clear()
         s, _, d = self.req("POST", "/api/login", {"user": "u2", "password": pw}, cookie="")
         self.assertEqual(s, 429, d)                       # dung mat khau van bi khoa

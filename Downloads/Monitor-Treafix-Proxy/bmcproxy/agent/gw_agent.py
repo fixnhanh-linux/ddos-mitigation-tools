@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from gw_auth import AuthGateway, start_auth_server
 from gw_limit import LimitManager
-from gw_common import (SETTINGS_DEFAULTS, bmc_ports, VERSION, ValidationError, cert_info, http_json, validate_dashboard,
+from gw_common import (BUILD, SETTINGS_DEFAULTS, bmc_ports, VERSION, ValidationError, cert_info, http_json, validate_dashboard,
                        is_managed, now_iso, read_json, read_text, run_cmd, upstream_host_port,
                        validate_bmc_fields, validate_settings_values, write_json, write_text_atomic)
 from gw_nginx import DISABLED_SUFFIX, nginx_ports, scan_nginx_dir
@@ -316,7 +316,7 @@ class Agent:
 
     def heartbeat(self):
         return {
-            "site": self.cfg["site"], "version": VERSION, "hostname": socket.gethostname(),
+            "site": self.cfg["site"], "version": VERSION, "build": BUILD, "hostname": socket.gethostname(),
             "params": self.params(), "reserved_ports": self.reserved_ports(),
             "applied_rev": (self.release or {}).get("rev"),
             "attempt": self.attempt, "health": {str(k): v for k, v in self.health.items()},
@@ -332,17 +332,24 @@ class Agent:
         with self.extra_lock:
             sent = dict(self.extra)
         hb.update(sent)
+        access = self.gateway.pop_access()  # lan mo BMC / console (gui 1 lan, loi thi gui lai)
+        if access:
+            hb["access"] = access
         try:
             status, resp = self.call("POST", "sync", hb)
         except OSError as e:
+            self.gateway.requeue_access(access)
             if self.controller_ok is not False:
                 log(f"không kết nối được controller: {e}")
             self.controller_ok = False
             return
         if status != 200 or not isinstance(resp, dict):
+            self.gateway.requeue_access(access)
             log(f"controller trả lỗi {status}: {resp}")
             self.controller_ok = False
             return
+        if "guests" in resp:
+            self.gateway.set_guests(resp["guests"])
         if self.controller_ok is not True:
             log("đã kết nối controller")
         self.controller_ok = True
@@ -397,10 +404,88 @@ class Agent:
                 ok, out = run_cmd(self.cfg["traefik_restart_cmd"])
             log(f"web yêu cầu restart Traefik: {'OK' if ok else 'LỖI'} {out[-200:]}")
             self.put_extra("action", {"name": name, "ok": ok, "output": out[-2000:], "at": now_iso()})
+        elif name == "update_agent":
+            with self.lock:  # khong chen giua luc dang ap dung cau hinh
+                self.update_agent(cmd if isinstance(cmd, dict) else {})
         elif name == "restart_agent":
             log("web yêu cầu restart agent - thoát để systemd chạy lại")
             self.put_extra("action", {"name": name, "ok": True, "output": "agent đang khởi động lại", "at": now_iso()})
             threading.Timer(4, lambda: os._exit(3)).start()   # cho kip gui ket qua o lan sync sau
+
+    def update_agent(self, cmd):
+        """Tai goi agent moi tu web (kiem SHA-256), thu import, sao luu ban cu, chep de roi khoi dong lai."""
+        import hashlib
+        import tempfile
+        import urllib.request
+        import zipfile
+        from gw_common import ssl_context
+
+        def done(ok, out):
+            log(f"cập nhật agent: {'OK' if ok else 'LỖI'} {out}")
+            self.put_extra("action", {"name": "update_agent", "ok": ok, "output": out, "at": now_iso(),
+                                      "from": BUILD, "to": cmd.get("build", "")})
+
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        if os.path.isdir(os.path.join(os.path.dirname(app_dir), "controller")):
+            return done(False, "agent đang chạy từ thư mục mã nguồn - không tự cập nhật")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(cmd.get("sha256", ""))):
+            return done(False, "lệnh thiếu mã SHA-256 của gói")
+        url = f"{self.cfg['controller_url']}/agent/v1/package"
+        req = urllib.request.Request(url, data=b"{}", method="POST", headers={
+            "Authorization": f"Bearer {self.cfg['token']}", "X-Agent-Site": self.cfg["site"],
+            "Content-Type": "application/json"})
+        ctx = ssl_context(self.cfg["verify_tls"]) if url.startswith("https") else None
+        try:
+            with urllib.request.urlopen(req, timeout=60, context=ctx) as r:
+                data = r.read(30 * 1024 * 1024 + 1)
+        except OSError as e:
+            return done(False, f"không tải được gói từ web: {e}")
+        if hashlib.sha256(data).hexdigest() != cmd["sha256"]:
+            return done(False, "SHA-256 của gói tải về không khớp - bỏ qua")
+        tmp = tempfile.mkdtemp(prefix="agent-update-", dir=self.dir)
+        try:
+            zpath = os.path.join(tmp, "agent.zip")
+            with open(zpath, "wb") as f:
+                f.write(data)
+            with zipfile.ZipFile(zpath) as z:
+                names = z.namelist()
+                if any(n.startswith("/") or ".." in n.split("/") or not n.startswith("bmc-gateway-agent/") for n in names):
+                    return done(False, "gói có đường dẫn lạ - bỏ qua")
+                z.extractall(tmp)
+            src = os.path.join(tmp, "bmc-gateway-agent")
+            for need in ("bmcproxy.py", "gw_agent.py", "gw_auth.py", "gw_common.py"):
+                if not os.path.isfile(os.path.join(src, need)):
+                    return done(False, f"gói thiếu {need}")
+            ok, out = run_cmd([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); "
+                               "import gw_agent, gw_auth, gw_render, gw_limit, gw_nginx, gw_errpage, gw_java, gw_kvm", src],
+                              timeout=60)
+            if not ok:
+                return done(False, f"bản mới chạy thử lỗi, giữ bản cũ: {out[-600:]}")
+            bdir = os.path.join(self.dir, "agent-backup-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+            os.makedirs(bdir)
+            for n in os.listdir(app_dir):
+                p = os.path.join(app_dir, n)
+                if os.path.isfile(p) and (n.endswith(".py") or n in ("BUILD", "VERSION")):
+                    shutil.copy2(p, bdir)
+            if os.path.isdir(os.path.join(app_dir, "kvm")):
+                shutil.copytree(os.path.join(app_dir, "kvm"), os.path.join(bdir, "kvm"))
+            for n in os.listdir(src):
+                p = os.path.join(src, n)
+                if os.path.isfile(p) and (n.endswith(".py") or n in ("BUILD", "VERSION")):
+                    shutil.copy2(p, os.path.join(app_dir, n + ".new"))
+                    os.replace(os.path.join(app_dir, n + ".new"), os.path.join(app_dir, n))
+            if os.path.isdir(os.path.join(src, "kvm")):
+                shutil.rmtree(os.path.join(app_dir, "kvm"), ignore_errors=True)
+                shutil.copytree(os.path.join(src, "kvm"), os.path.join(app_dir, "kvm"))
+            olds = sorted(d for d in os.listdir(self.dir) if d.startswith("agent-backup-"))
+            for d in olds[:-3]:
+                shutil.rmtree(os.path.join(self.dir, d), ignore_errors=True)
+        except (OSError, zipfile.BadZipFile) as e:
+            return done(False, f"lỗi khi cài bản mới: {e}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        done(True, f"đã cập nhật {BUILD} → {cmd.get('build') or '?'} (bản cũ lưu ở {bdir}), đang khởi động lại agent")
+        threading.Timer(4, lambda: os._exit(3)).start()   # systemd (Restart=always) chay ban moi
 
     def put_extra(self, key, value):
         with self.extra_lock:

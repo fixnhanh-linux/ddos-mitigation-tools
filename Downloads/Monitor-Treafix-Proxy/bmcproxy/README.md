@@ -38,6 +38,9 @@ Cổng truy cập BMC / IPMI (iDRAC, iLO, AMI, Supermicro…) cho **nhiều site
 | Phân quyền | **Quản trị**: toàn quyền. **Vận hành**: sửa BMC và áp dụng cho site được giao. **Chỉ xem**: chỉ xem site được giao |
 | Giám sát | Tổng quan 4 site. BMC mất kết nối (kiểm tra từ chính server của site). Lượt xác thực / bị chặn. Cảnh báo chứng chỉ, nginx chiếm cổng, agent mất liên lạc. API Zabbix |
 | Sao lưu | Web: danh sách BMC, site, cài đặt. Mỗi server: config Traefik trước mỗi lần áp dụng (giữ 30 bản) |
+| Cảnh báo | Telegram / email: site mất liên lạc, BMC mất kết nối, BMC sắp hết hạn, áp dụng lỗi, khoá tài khoản, cập nhật agent |
+| Truy cập BMC | Ai mở trang BMC / console nào, lúc nào, từ IP nào. Link tạm cho khách (có hạn, thu hồi được). Xuất CSV |
+| Cập nhật agent | Bấm 1 nút trên web: agent tự tải bản mới (kiểm SHA-256), chạy thử, sao lưu bản cũ, khởi động lại |
 
 ## 1. Cài web (controller)
 
@@ -171,6 +174,7 @@ bmcproxy/
 │   ├── gw_controller.py     Giao diện + API, đăng nhập, phân quyền, site, BMC, áp dụng, sao lưu, API agent
 │   ├── gw_db.py             Lưu dữ liệu vào MySQL (tuỳ chọn, mặc định file JSON)
 │   ├── gw_ldap.py           Đăng nhập bằng Active Directory / LDAP
+│   ├── gw_notify.py         Cảnh báo Telegram / email (chạy nền, báo khi trạng thái đổi)
 │   ├── gw_templates.py      Mẫu BMC theo loại máy, nhập / xuất CSV
 │   ├── web/                 Giao diện: index.html · app.js · app.css
 │   └── agent-package/       (sinh ra) gói agent cho lệnh "cài agent 1 dòng"

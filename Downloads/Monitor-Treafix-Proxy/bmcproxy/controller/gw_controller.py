@@ -22,9 +22,10 @@ import traceback
 import urllib.parse
 
 import gw_ldap
+import gw_notify
 from gw_auth import ThreadingServer
 from gw_common import (BMC_DEFAULTS, bmc_ports, parse_tcp_ports, DASHBOARD_DEFAULTS, OVERRIDABLE, apr1_hash, validate_dashboard, RE_DOMAIN, RE_IP, RE_SITE_KEY, RE_USER, ROLES,
-                       SETTINGS_DEFAULTS, VERSION, ValidationError, cert_info, check_password, totp_check, totp_new_secret, totp_uri,
+                       SETTINGS_DEFAULTS, VERSION, GUEST_PATH, ValidationError, cert_info, check_password, totp_check, totp_new_secret, totp_uri,
                        clean_text, hash_password, hash_token, now_iso, read_json, to_port,
                        validate_bmc_fields, validate_settings_values, write_json)
 from gw_templates import (BUILTIN_TEMPLATES, all_templates, apply_template, export_csv, parse_rows,
@@ -161,8 +162,40 @@ def read_backup_dir(path):
                                    ("bmc.json", "settings.json", "sites.json") if os.path.isfile(os.path.join(path, n))}}
 
 
+_PKG_CACHE = {}
+
+
+def agent_pkg_info():
+    """Goi agent nam trong goi web -> {"path", "sha256", "build"} (cache theo mtime)."""
+    import hashlib
+    import zipfile
+    try:
+        pk = sorted(f for f in os.listdir(AGENT_PKG_DIR) if f.startswith("bmc-gateway-agent") and f.endswith(".zip"))
+    except OSError:
+        return None
+    if not pk:
+        return None
+    path = os.path.join(AGENT_PKG_DIR, pk[-1])
+    mt = os.path.getmtime(path)
+    hit = _PKG_CACHE.get(path)
+    if hit and hit[0] == mt:
+        return hit[1]
+    with open(path, "rb") as f:
+        data = f.read()
+    build = ""
+    try:
+        with zipfile.ZipFile(path) as z:
+            build = z.read("bmc-gateway-agent/BUILD").decode("utf-8", "replace").strip()
+    except (KeyError, zipfile.BadZipFile, OSError):
+        pass
+    info = {"path": path, "sha256": hashlib.sha256(data).hexdigest(), "build": build or "?", "size": len(data)}
+    _PKG_CACHE[path] = (mt, info)
+    return info
+
+
 class Store:
-    FILES = ("bmc.json", "settings.json", "sites.json", "users.json", "state.json", "templates.json", "auth.json")
+    FILES = ("bmc.json", "settings.json", "sites.json", "users.json", "state.json", "templates.json", "auth.json",
+             "notify.json", "guests.json")
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -276,6 +309,8 @@ class Store:
         self.state = docs.get("state.json", {})
         self.templates = docs.get("templates.json", {})
         self.auth = docs.get("auth.json", {})  # dang nhap AD / LDAP (rieng, khong anh huong ban cau hinh site)
+        self.notify = docs.get("notify.json", {})  # canh bao Telegram / email
+        self.guests = docs.get("guests.json", {})  # link tam cho khach: id -> {...}
 
     def _p(self, *name):
         return os.path.join(self.dir, *name)
@@ -303,6 +338,8 @@ class Store:
             self.state = read_json(self._p("state.json"), {})
             self.templates = read_json(self._p("templates.json"), {})
             self.auth = read_json(self._p("auth.json"), {})
+            self.notify = read_json(self._p("notify.json"), {})
+            self.guests = read_json(self._p("guests.json"), {})
             self.mtimes = cur
 
     def _refresh_db(self):
@@ -318,7 +355,7 @@ class Store:
                 self.db_error = ""
                 for name, (obj, _) in rows.items():  # ban sao JSON cho Sao luu / du phong
                     if name in self.FILES:
-                        write_json(self._p(name), obj, 0o600 if name in ("users.json", "sites.json", "auth.json") else 0o644)
+                        write_json(self._p(name), obj, 0o600 if name in ("users.json", "sites.json", "auth.json", "notify.json", "guests.json") else 0o644)
             except Exception as e:  # mat MySQL: dung du lieu dang co trong bo nho
                 self.db_error = f"{type(e).__name__}: {e}"
                 if not hasattr(self, "bmcs"):
@@ -348,8 +385,10 @@ class Store:
                 "users.json": lambda: self.users,
                 "state.json": lambda: self.state,
                 "templates.json": lambda: self.templates,
-                "auth.json": lambda: self.auth}[name]()
-        write_json(self._p(name), data, 0o600 if name in ("users.json", "sites.json", "auth.json") else 0o644)
+                "auth.json": lambda: self.auth,
+                "notify.json": lambda: self.notify,
+                "guests.json": lambda: self.guests}[name]()
+        write_json(self._p(name), data, 0o600 if name in ("users.json", "sites.json", "auth.json", "notify.json", "guests.json") else 0o644)
         self.mtimes[name] = self._mtime(name)
         if self.db:
             try:
@@ -364,11 +403,20 @@ class Store:
     def audit(self, user, action, detail="", site="", ip=None):
         rec = {"ts": now_iso(), "user": user, "action": action, "site": site, "detail": detail,
                "ip": getattr(REQ, "ip", "") if ip is None else ip, "ua": getattr(REQ, "ua", "")}
-        line = json.dumps(rec, ensure_ascii=False)
+        self.append_log("audit.log", [rec])
+        if self.db:
+            try:
+                self.db.audit_add(rec)
+            except Exception as e:
+                self.db_error = f"{type(e).__name__}: {e}"
+
+    def append_log(self, name, recs):
+        """Ghi them dong JSON vao data/<name>; qua AUDIT_MAX_BYTES thi xoay vong <name>.1 ... .AUDIT_KEEP."""
         with self.lock:
-            path = self._p("audit.log")
+            path = self._p(name)
             with open(path, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
+                for rec in recs:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 big = f.tell() > AUDIT_MAX_BYTES
             if big:
                 try:
@@ -377,12 +425,57 @@ class Store:
                             os.replace(f"{path}.{i}", f"{path}.{i + 1}")
                     os.replace(path, f"{path}.1")
                 except OSError as e:  # Windows: file dang mo o luong khac -> lan ghi sau thu lai
-                    sys.stderr.write(f"không xoay vòng được audit.log: {e}\n")
+                    sys.stderr.write(f"không xoay vòng được {name}: {e}\n")
+
+    def read_log(self, name, limit, keep=None):
+        lines = tail_lines(self._p(name), limit * (4 if keep else 1))
+        if len(lines) < limit:  # vua xoay vong: lay them o file cu
+            lines = tail_lines(self._p(name + ".1"), limit - len(lines)) + lines
+        out = []
+        for ln in reversed(lines):
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                continue
+            if keep is None or keep(r):
+                out.append(r)
+                if len(out) >= limit:
+                    break
+        return out
+
+    # ------------------------------------------------------------ lan mo BMC / console (agent gui ve)
+    def access_add(self, site, items):
+        rows = []
+        for x in (items or [])[:3000]:
+            if not isinstance(x, dict):
+                continue
+            try:
+                port = int(x.get("port"))
+            except (TypeError, ValueError):
+                continue
+            kind = str(x.get("kind", "web"))
+            rows.append({"ts": str(x.get("ts", ""))[:32] or now_iso(), "site": site, "port": port,
+                         "ip": str(x.get("ip", ""))[:64], "user": str(x.get("user", ""))[:80],
+                         "kind": kind if kind in ("web", "console", "guest-open") else "web",
+                         "path": str(x.get("path", ""))[:160]})
+        if not rows:
+            return
+        self.append_log("access.log", rows)
         if self.db:
             try:
-                self.db.audit_add(rec)
+                self.db.access_add(rows)
             except Exception as e:
                 self.db_error = f"{type(e).__name__}: {e}"
+
+    def read_access(self, limit=1000, site="", port=0):
+        if self.db:
+            try:
+                return self.db.access_read(limit, site, port)
+            except Exception as e:
+                self.db_error = f"{type(e).__name__}: {e}"
+        return self.read_log("access.log", limit,
+                             (lambda r: (not site or r.get("site") == site) and (not port or r.get("port") == port))
+                             if site or port else None)
 
     def read_audit(self, limit=500):
         if self.db:
@@ -390,16 +483,7 @@ class Store:
                 return self.db.audit_read(limit)
             except Exception as e:
                 self.db_error = f"{type(e).__name__}: {e}"
-        lines = tail_lines(self._p("audit.log"), limit)
-        if len(lines) < limit:  # vua xoay vong: lay them o file cu
-            lines = tail_lines(self._p("audit.log.1"), limit - len(lines)) + lines
-        out = []
-        for ln in reversed(lines):
-            try:
-                out.append(json.loads(ln))
-            except ValueError:
-                pass
-        return out
+        return self.read_log("audit.log", limit)
 
     # ------------------------------------------------------------ site
     def site_settings(self, site):
@@ -457,6 +541,7 @@ def new_site_record(key, label, domain):
 class App:
     def __init__(self, store):
         self.store = store
+        self.notifier = gw_notify.Notifier(lambda: self.store.notify, self.notify_snapshot, self._notify_result)
         self.hb = {}            # site -> heartbeat moi nhat (bo nho)
         self.commands = {}      # site -> [lenh cho agent]
         self.extra = {}         # site -> {"logs"|"diag"|"action": ket qua agent gui ve}
@@ -647,6 +732,56 @@ class App:
     def visible_sites(self, u):
         return [k for k in sorted(self.store.sites) if self.can_view(u, k)]
 
+    # ------------------------------------------------------------ link tam cho khach
+    def site_guests(self, site):
+        """Link khach con han cua site -> gui xuong agent (chi ban bam cua ma)."""
+        now = time.time()
+        return [{"hash": g["hash"], "port": g["port"], "exp": g["exp"], "label": g.get("label", ""), "id": gid}
+                for gid, g in self.store.guests.items()
+                if g["site"] == site and not g.get("revoked") and g["exp"] > now]
+
+    @staticmethod
+    def guest_view(gid, g):
+        now = time.time()
+        status = "revoked" if g.get("revoked") else "expired" if g["exp"] <= now else "active"
+        return {"id": gid, "site": g["site"], "port": g["port"], "label": g.get("label", ""),
+                "expires": dt.datetime.fromtimestamp(g["exp"]).isoformat(timespec="seconds"),
+                "left_minutes": max(0, int((g["exp"] - now) // 60)), "status": status,
+                "created_at": g.get("created_at"), "created_by": g.get("created_by"),
+                "revoked_by": g.get("revoked_by", "")}
+
+    # ------------------------------------------------------------ canh bao
+    def notify_snapshot(self):
+        st = self.store
+        today = dt.date.today()
+        soon = (today + dt.timedelta(days=7)).isoformat()
+        sites, expiring = [], []
+        with st.lock:
+            for k in sorted(st.sites):
+                s = st.sites[k]
+                h = self.hb.get(k) or {}
+                online = self.online(k)
+                health = h.get("health") or {}
+                bmcs = []
+                for b in st.bmcs:
+                    if b["site"] != k or not b.get("enabled", True):
+                        continue
+                    web = (health.get(str(b["port"])) or {}).get("web") or {}
+                    bmcs.append({"port": b["port"], "note": b.get("note", ""), "upstream": b.get("upstream", ""),
+                                 "down": online and web.get("up") is False, "error": web.get("error", "")})
+                    exp = b.get("expires") or ""
+                    if exp and today.isoformat() <= exp <= soon:
+                        expiring.append({"site": k, "port": b["port"], "expires": exp, "note": b.get("note", "")})
+                sites.append({"key": k, "label": s["label"], "token_set": bool(s.get("token_hash")),
+                              "seen": bool(h) or bool((st.state.get(k) or {}).get("applied")),
+                              "online": online, "hostname": h.get("hostname"), "bmcs": bmcs})
+        return {"sites": sites, "expiring": sorted(expiring, key=lambda x: x["expires"])}
+
+    def _notify_result(self, kind, title, res):
+        bad = {k: v for k, v in res.items() if v != "ok"}
+        if bad:
+            self.store.audit("hệ thống", "notify-failed", f"{title} → " + "; ".join(f"{k}: {v}" for k, v in bad.items()), ip="")
+
     # ------------------------------------------------------------ trang thai site
     def online(self, site):
         h = self.hb.get(site)
@@ -698,6 +833,8 @@ class App:
             "dashboard": self.dashboard_view(site),
             "sysinfo": h.get("sysinfo") or {},
             "extra_at": {k: (v or {}).get("at") for k, v in (self.extra.get(site) or {}).items()},
+            "agent_build": h.get("build") or "",
+            "agent_pkg_build": (agent_pkg_info() or {}).get("build", ""),
             "history_count": len((state.get("history") or [])),
         }
 
@@ -1123,9 +1260,17 @@ def make_handler(app):
             if name == "sync":
                 data["_received"] = time.time()
                 data["_ip"] = self.client_address[0]
+                act = data.get("action") if isinstance(data.get("action"), dict) else None
+                if act and act.get("name") == "update_agent":
+                    st.audit("agent", "agent-update" if act.get("ok") else "agent-update-failed",
+                             str(act.get("output", ""))[:300], site)
+                    app.notifier.event("agent_update", ("✅ Đã cập nhật agent" if act.get("ok") else "❌ Cập nhật agent lỗi")
+                                       + f" ở site {st.sites[site]['label']}", str(act.get("output", ""))[:500])
                 for k in ("logs", "diag", "action"):
                     if isinstance(data.get(k), dict):
                         app.extra.setdefault(site, {})[k] = data.pop(k)
+                if isinstance(data.get("access"), list):
+                    st.access_add(site, data.pop("access"))
                 was_online = app.online(site)
                 app.hb[site] = data
                 if not was_online:
@@ -1133,7 +1278,7 @@ def make_handler(app):
                 with st.lock:
                     cmds = app.commands.pop(site, [])
                     target = (st.state.get(site) or {}).get("target")
-                resp = {"target": target, "commands": cmds, "server_time": now_iso()}
+                resp = {"target": target, "commands": cmds, "server_time": now_iso(), "guests": app.site_guests(site)}
                 att = data.get("attempt") or {}
                 # Agent da ap dung nhung goi /report bi mat (mang chap chon): lay ket qua tu heartbeat
                 if target and (att.get("rev"), att.get("attempt")) == (target["rev"], target["attempt"]):
@@ -1159,9 +1304,20 @@ def make_handler(app):
                     st.save("state.json")
                 st.audit("agent", "apply-ok" if data.get("ok") else "apply-failed",
                          f"rev {data.get('rev')}", site)
+                if not data.get("ok"):
+                    failed = [x for x in data.get("log") or [] if not x.get("ok")]
+                    app.notifier.event("apply_failed", f"❌ Áp dụng lỗi ở site {st.sites[site]['label']}",
+                                       "Đã tự khôi phục cấu hình cũ.\n" + "\n".join(
+                                           f"- {x.get('step')}: {str(x.get('output') or '')[:300]}" for x in failed[:5]))
                 return self.send(200, {"ok": True})
             if name == "import":
                 return self.send(200, self.agent_import(site, data))
+            if name == "package":  # lenh "Cap nhat agent": agent tai goi moi bang token cua minh
+                info = agent_pkg_info()
+                if not info:
+                    return self.err(404, "Web chưa có gói agent")
+                with open(info["path"], "rb") as f:
+                    return self.send(200, f.read(), "application/zip")
             return self.err(404, "Không tìm thấy")
 
         def agent_import(self, site, data):
@@ -1224,6 +1380,9 @@ def make_handler(app):
                 # tai khoan rieng cua web (admin du phong van vao duoc khi AD hong)
                 if not rec or rec.get("source") == "ldap" or not check_password(rec, password):
                     locked = app.login_failed(ip, name if rec else "")
+                    if locked:
+                        app.notifier.event("login_locked", f"🔒 Khoá tài khoản {name} {ACCOUNT_LOCK_SECONDS // 60} phút",
+                                           f"Sai mật khẩu {ACCOUNT_MAX_FAILS} lần liên tiếp, lần cuối từ IP {ip}.")
                     if rec:
                         st.audit(name, "login-fail", "sai mật khẩu"
                                  + (f" - khoá tài khoản {ACCOUNT_LOCK_SECONDS // 60} phút" if locked else ""))
@@ -1264,6 +1423,59 @@ def make_handler(app):
                       + (f"; Max-Age={REMEMBER_TTL}" if remember else "") + secure)
             return self.send(200, app.user(name), headers={"Set-Cookie": cookie})
 
+        def api_guests(self, method, gid, u):
+            if method == "GET" and gid is None:
+                rows = [app.guest_view(i, g) for i, g in st.guests.items() if app.can_view(u, g["site"])]
+                site = (self.query.get("site") or [""])[0]
+                port = (self.query.get("port") or [""])[0]
+                rows = [r for r in rows if (not site or r["site"] == site) and (not port or str(r["port"]) == port)]
+                order = {"active": 0, "expired": 1, "revoked": 2}
+                return self.send(200, sorted(rows, key=lambda r: (order[r["status"]], r["expires"]), reverse=False))
+            if method == "POST" and gid is None:
+                data = self.body_json(10_000)
+                site = str(data.get("site", ""))
+                if site not in st.sites:
+                    raise ValidationError("Không có site này")
+                app.need_edit(u, site)
+                port = to_port(data.get("port"), "Cổng")
+                b = st.get_bmc(site, port)
+                if not b:
+                    raise ValidationError("Không có BMC này")
+                if not b.get("auth", True):
+                    raise ValidationError("BMC đang tắt 'Bắt xác thực' - ai có link BMC cũng vào được, không cần link khách")
+                try:
+                    hours = float(data.get("hours") or 4)
+                except (TypeError, ValueError):
+                    raise ValidationError("Số giờ là số")
+                if not 0.25 <= hours <= 168:
+                    raise ValidationError("Thời hạn từ 15 phút đến 7 ngày")
+                label = clean_text(data.get("label", ""), 60)
+                token = secrets.token_urlsafe(24)
+                gid = secrets.token_hex(6)
+                now = time.time()
+                with st.lock:
+                    for old in [i for i, g in st.guests.items() if g["exp"] < now - 30 * 86400]:  # don link qua 30 ngay
+                        del st.guests[old]
+                    st.guests[gid] = {"hash": hash_token(token), "site": site, "port": port, "label": label,
+                                      "exp": now + hours * 3600, "created_at": now_iso(), "created_by": u["name"]}
+                    st.save("guests.json")
+                url = f"https://{st.sites[site]['domain']}:{port}{GUEST_PATH}?t={token}"
+                st.audit(u["name"], "guest-add", f"cổng {port}, {hours:g} giờ" + (f", {label}" if label else ""), site)
+                return self.send(201, {**app.guest_view(gid, st.guests[gid]), "url": url,
+                                       "site_online": app.online(site)})
+            if method == "DELETE" and gid:
+                g = st.guests.get(gid)
+                if not g:
+                    return self.err(404, "Không có link này")
+                app.need_edit(u, g["site"])
+                with st.lock:
+                    g["revoked"], g["revoked_by"] = True, u["name"]
+                    st.save("guests.json")
+                st.audit(u["name"], "guest-revoke", f"cổng {g['port']}" + (f", {g.get('label')}" if g.get("label") else ""),
+                         g["site"])
+                return self.send(200, {"ok": True})
+            return self.err(404, "Không tìm thấy API")
+
         def ldap_login(self, lc, raw, password, ip):
             """-> (ten, ban ghi, None) hoac (_, _, phan hoi loi da gui)."""
             name = gw_ldap.normalize_user(raw)
@@ -1278,6 +1490,9 @@ def make_handler(app):
             except gw_ldap.LdapError as e:
                 if e.kind == "bad":
                     locked = app.login_failed(ip, name)
+                    if locked:
+                        app.notifier.event("login_locked", f"🔒 Khoá tài khoản AD {name} {ACCOUNT_LOCK_SECONDS // 60} phút",
+                                           f"Sai mật khẩu {ACCOUNT_MAX_FAILS} lần liên tiếp, lần cuối từ IP {ip}.")
                     if local:
                         st.audit(name, "login-fail", f"AD: {e}"
                                  + (f" - khoá {ACCOUNT_LOCK_SECONDS // 60} phút" if locked else ""))
@@ -1393,6 +1608,45 @@ def make_handler(app):
                                  headers={"Set-Cookie": f"bmcproxy_session=; Path={(st.cfg.get('web_path') or '') + '/'}; Max-Age=0"})
             if res == "ldap":
                 return self.api_ldap(method, a1, u)
+            if res == "guests":
+                return self.api_guests(method, a1, u)
+            if res == "access" and method == "GET":
+                if u["role"] == "viewer":
+                    raise PermissionError("Không có quyền xem lịch sử truy cập")
+                site = (self.query.get("site") or [""])[0]
+                try:
+                    port = int((self.query.get("port") or ["0"])[0] or 0)
+                    limit = max(50, min(5000, int((self.query.get("limit") or ["2000"])[0])))
+                except ValueError:
+                    raise ValidationError("Tham số không hợp lệ")
+                if site and not app.can_view(u, site):
+                    raise PermissionError("Không có quyền xem site này")
+                rows = [r for r in st.read_access(limit, site, port) if app.can_view(u, r.get("site", ""))]
+                notes = {(b["site"], b["port"]): b.get("note", "") for b in st.bmcs}
+                for r in rows:
+                    r["note"] = notes.get((r.get("site"), r.get("port")), "")
+                return self.send(200, rows)
+            if res == "notify":
+                app.need_admin(u)
+                if method == "GET":
+                    return self.send(200, {**gw_notify.public_view(st.notify), "sent": app.notifier.sent})
+                data = self.body_json(20_000)
+                if method == "PUT" and a1 is None:
+                    cfg = gw_notify.validate(data, st.notify)
+                    with st.lock:
+                        st.notify = cfg
+                        st.save("notify.json")
+                    chans = [n for n, on in (("Telegram", cfg["telegram"]["enabled"]), ("email", cfg["email"]["enabled"])) if on]
+                    st.audit(u["name"], "notify", "bật " + ", ".join(chans) if chans else "tắt cảnh báo")
+                    return self.send(200, gw_notify.public_view(cfg))
+                if method == "POST" and a1 == "test":
+                    cfg = gw_notify.validate(data, st.notify)  # thu voi gia tri tren form (chua can Luu)
+                    if not (cfg["telegram"]["enabled"] or cfg["email"]["enabled"]):
+                        raise ValidationError("Bật ít nhất 1 kênh (Telegram / email) để thử")
+                    res = gw_notify.deliver(cfg, "Thử cảnh báo",
+                                            f"Tin thử từ web ({st.cfg['listen_port']}) do {u['name']} gửi lúc {now_iso()}.")
+                    st.audit(u["name"], "notify-test", "; ".join(f"{k}: {v}" for k, v in res.items()))
+                    return self.send(200, res)
             if res == "password" and method == "POST":
                 if st.users[u["name"]].get("source") == "ldap":
                     raise ValidationError("Tài khoản AD: đổi mật khẩu trên Windows (Ctrl+Alt+Del → Đổi mật khẩu) hoặc nhờ IT")
@@ -1562,13 +1816,18 @@ def make_handler(app):
                 cmd_body = self.body_json()
                 name = str(cmd_body.get("name", ""))
                 if name not in ("import", "recheck", "clear_cache", "logs", "diagnose", "restart_traefik",
-                                "restart_agent"):
+                                "restart_agent", "update_agent"):
                     raise ValidationError("Lệnh không hợp lệ")
-                if name in ("clear_cache", "logs", "restart_traefik", "restart_agent"):
+                if name in ("clear_cache", "logs", "restart_traefik", "restart_agent", "update_agent"):
                     app.need_admin(u)
                 else:
                     app.need_edit(u, key)
                 cmd = {"name": name}
+                if name == "update_agent":
+                    info = agent_pkg_info()
+                    if not info:
+                        raise ValidationError("Web chưa có gói agent (cài web bằng gói bmc-gateway-web mới)")
+                    cmd.update(sha256=info["sha256"], build=info["build"])
                 if name == "diagnose":  # gui kem danh sach BMC hien tai tren web (ke ca BMC chua ap dung)
                     cmd["bmcs"] = [{k: b.get(k) for k in ("port", "upstream", "legacy_tls", "note", "enabled")}
                                    for b in st.desired(key)["bmcs"]
@@ -2138,6 +2397,7 @@ def serve(store):
         sys.exit("Chưa có tài khoản. Chạy: python3 bmcproxy.py adduser admin")
     cfg = store.cfg
     app = App(store)
+    app.notifier.start()
     httpd = ThreadingServer((cfg["listen_host"], cfg["listen_port"]), make_handler(app))
     httpd.ssl_ctx = None
     scheme = "http"

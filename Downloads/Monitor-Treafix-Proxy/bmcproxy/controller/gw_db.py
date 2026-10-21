@@ -21,6 +21,7 @@ from gw_common import ValidationError
 DOCS = "bmcproxy_docs"
 AUDIT = "bmcproxy_audit"
 BLOBS = "bmcproxy_blobs"
+ACCESS = "bmcproxy_access"
 
 
 def db_password(c):
@@ -135,6 +136,23 @@ class DocDB:
             self._exec(f"CREATE TABLE IF NOT EXISTS {BLOBS} (kind TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL, "
                        "updated_at TEXT NOT NULL, PRIMARY KEY (kind, name))")
 
+        if self.kind == "mysql":
+            self._exec(f"""CREATE TABLE IF NOT EXISTS {ACCESS} (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                ts VARCHAR(32) NOT NULL,
+                site VARCHAR(64) NOT NULL DEFAULT '',
+                port INT NOT NULL DEFAULT 0,
+                ip VARCHAR(64) NOT NULL DEFAULT '',
+                user VARCHAR(80) NOT NULL DEFAULT '',
+                kind VARCHAR(16) NOT NULL DEFAULT '',
+                path VARCHAR(160) NOT NULL DEFAULT '',
+                KEY idx_bmc (site, port, ts),
+                KEY idx_ts (ts)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+        else:
+            self._exec(f"CREATE TABLE IF NOT EXISTS {ACCESS} (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, "
+                       "site TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0, ip TEXT NOT NULL DEFAULT '', "
+                       "user TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '')")
         self._add_audit_columns()
 
     def _add_audit_columns(self):
@@ -225,6 +243,27 @@ class DocDB:
                           f"LIMIT {int(limit)}", fetch=True)
         return [{"ts": r[0], "user": r[1], "action": r[2], "site": r[3], "detail": r[4] or "", "ip": r[5] or "",
                  "ua": r[6] or ""} for r in rows]
+
+    # ------------------------------------------------------------ lan mo BMC
+    def access_add(self, rows):
+        p = self.ph
+        for r in rows:
+            self._exec(f"INSERT INTO {ACCESS} (ts, site, port, ip, user, kind, path) VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p})",
+                       (r["ts"], r["site"], int(r["port"]), r["ip"], r["user"], r["kind"], r["path"]))
+
+    def access_read(self, limit=1000, site="", port=0):
+        p = self.ph
+        where, args = [], []
+        if site:
+            where.append(f"site = {p}")
+            args.append(site)
+        if port:
+            where.append(f"port = {p}")
+            args.append(int(port))
+        sql = (f"SELECT ts, site, port, ip, user, kind, path FROM {ACCESS}" + (" WHERE " + " AND ".join(where) if where else "")
+               + f" ORDER BY id DESC LIMIT {int(limit)}")
+        return [{"ts": r[0], "site": r[1], "port": int(r[2]), "ip": r[3], "user": r[4], "kind": r[5], "path": r[6]}
+                for r in self._exec(sql, tuple(args), fetch=True)]
 
     def audit_count(self):
         return int(self._exec(f"SELECT COUNT(*) FROM {AUDIT}", fetch=True)[0][0])

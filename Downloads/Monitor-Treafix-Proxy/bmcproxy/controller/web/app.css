@@ -613,3 +613,14 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
 .sa-tools .btn:hover .ico { color: var(--accent); }
 .sa-tools .count { min-width: 18px; padding: 0 6px; border-radius: 999px; font-size: 11.5px;
   line-height: 18px; text-align: center; background: var(--line-2); color: var(--muted); font-weight: 600; }
+
+/* ---------- canh bao / truy cap ---------- */
+#notify-form { margin-top: 16px; }
+.notify-box { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.notify-box legend { font-weight: 600; padding: 0 6px; }
+.notify-events { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; }
+.notify-events .check-line { font-weight: 400; display: inline-flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; }
+.sa-tools .btn.chip-warn { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+.sa-tools .btn.chip-warn .ico { color: var(--warn); }
+#guest-panel .table td { vertical-align: top; }
+.nowrap { white-space: nowrap; }

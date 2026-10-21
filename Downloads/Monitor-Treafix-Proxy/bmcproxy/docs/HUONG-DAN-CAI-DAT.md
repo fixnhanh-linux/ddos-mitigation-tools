@@ -1051,3 +1051,68 @@ Nhập **Thử đăng nhập** (tài khoản + mật khẩu AD của bạn) → 
 
 Bật TLS cho web đang dùng MySQL không mã hoá: chạy lại `sudo bash install.sh db` (nhập lại thông tin, dữ liệu giữ nguyên).
 Muốn kiểm tra cả chứng chỉ MySQL: `sudo DB_SSL_CA=/etc/bmcproxy/mysql-ca.pem bash install.sh db`.
+
+## 28. Cảnh báo, truy cập BMC, link khách, cập nhật agent
+
+> Sau khi cập nhật lên bản này: cập nhật web, bấm **Cập nhật agent** cho từng site (mục 28.4), rồi **Áp dụng** mỗi site 1 lần để Traefik có thêm đường dẫn link khách.
+
+### 28.1. Cảnh báo qua Telegram / Email
+
+**Cài đặt → Cảnh báo qua Telegram / Email** (chỉ quản trị).
+
+| Kênh | Chuẩn bị |
+|---|---|
+| Telegram | Nhắn **@BotFather** → `/newbot` → lấy **bot token**. Thêm bot vào nhóm NOC, nhắn 1 tin trong nhóm, mở `https://api.telegram.org/bot<token>/getUpdates` để lấy **chat id** (nhóm là số âm, vd `-1001234567890`) |
+| Email | Máy chủ SMTP + tài khoản. Gmail: `smtp.gmail.com`, 587, STARTTLS, **mật khẩu ứng dụng** (không dùng mật khẩu Gmail) |
+
+Bấm **Gửi thử** (thử luôn với giá trị trên form, chưa cần lưu) → **Lưu cảnh báo**. Server web phải ra được Internet: `api.telegram.org:443` hoặc cổng SMTP.
+
+| Báo khi | Cách báo |
+|---|---|
+| Site mất liên lạc / kết nối lại | Khi agent ngừng báo về quá thời gian `agent_offline_after` |
+| BMC mất kết nối / kết nối lại | BMC mất **liên tục** N phút (mặc định 3) mới báo, tránh báo khi chập chờn |
+| BMC sắp hết hạn | Tóm tắt **1 lần mỗi ngày lúc 8 giờ** các BMC hết hạn trong 7 ngày |
+| Áp dụng lỗi | Ngay khi agent báo lỗi, kèm bước bị lỗi (agent đã tự khôi phục) |
+| Khoá tài khoản | Khi 1 tài khoản sai mật khẩu 10 lần, kèm IP |
+| Cập nhật agent | Kết quả cập nhật từ web |
+
+Chỉ báo lúc trạng thái **đổi**. Web vừa khởi động lại thì lần quét đầu chỉ ghi nhận, không báo. Gửi lỗi (sai token, mất mạng…) được ghi vào **Nhật ký** (`notify-failed`). Bot token và mật khẩu SMTP lưu trong `notify.json` / MySQL, không gửi về trình duyệt.
+
+### 28.2. Trang Truy cập BMC
+
+Menu **Giám sát → Truy cập BMC** (quản trị, vận hành): ai mở **trang BMC** / **console** nào, lúc nào, từ **IP** nào.
+
+- Agent ghi lại ngay ở bước xác thực (forwardAuth) rồi gửi về web mỗi 10 giây. Web mất kết nối thì agent giữ lại, gửi khi có lại.
+- **Người dùng** lấy từ dịch vụ auth-token (`username` / `email` / `name` / `sub`…). Dịch vụ không trả tên thì ghi `(không rõ)`.
+- Cùng người + IP + BMC + loại trong **30 phút** chỉ ghi 1 dòng.
+- **Console**: noVNC (console Java trên web), file `.jnlp`. Console Java qua cổng TCP thô không đi qua xác thực nên không ghi được.
+- Lọc theo site / loại / tìm kiếm, **Xuất CSV**. Trong khung BMC có nút **Truy cập**: lịch sử riêng BMC đó.
+- Lưu ở `data/access.log` (tự xoay vòng như nhật ký) hoặc bảng MySQL `bmcproxy_access`.
+
+### 28.3. Link tạm cho khách
+
+BMC → bấm vào BMC → **Link khách** → chọn thời hạn (1 giờ … 7 ngày) + ghi chú (khách là ai) → **Tạo link**.
+
+- Link dạng `https://<tên-miền-site>:<cổng>/__bmcgw/guest?t=<mã>`. Khách mở là vào thẳng trang BMC, **không cần tài khoản**, chỉ đúng BMC đó, đến khi hết hạn.
+- **Link chỉ hiện 1 lần**: web chỉ lưu bản băm của mã.
+- **Thu hồi**: trang Truy cập BMC (bảng Link tạm cho khách) hoặc trong hộp thoại Link khách. Có hiệu lực sau ~10 giây, khách đang mở cũng bị chặn.
+- Mỗi lần khách mở link, mỗi trang khách vào đều ghi ở trang Truy cập BMC (nhãn vàng `khách: …`).
+- Chỉ tạo được cho BMC **đang bắt xác thực**. Người tạo phải có quyền sửa site đó.
+- Link báo **404**: site chưa áp dụng bản cấu hình có đường dẫn `/__bmcgw/guest` → bấm **Áp dụng** site.
+
+### 28.4. Cập nhật agent từ web
+
+Mỗi gói có file `BUILD` (mã bản, vd `2.0.0-cada9917e9`). Thẻ site hiện **Bản agent**. Web có gói agent mới hơn thì hiện nhãn **có bản mới** và nút **Cập nhật agent** (quản trị).
+
+Bấm **Cập nhật agent**, agent sẽ:
+1. tải gói từ web bằng token của chính nó (`/agent/v1/package`), kiểm tra **SHA-256** đúng với web;
+2. giải nén vào thư mục tạm, **chạy thử** (import mọi module) - lỗi thì giữ nguyên bản cũ;
+3. sao lưu bản cũ vào `/opt/bmcproxy/agent-data/agent-backup-<thời gian>/` (giữ 3 bản);
+4. chép file mới, thoát để systemd chạy lại (~10 giây). **Traefik và BMC không bị gián đoạn**.
+
+Chỉ thay code agent (`bmcproxy.py`, `gw_*.py`, `kvm/`). Không đổi `agent.json`, service systemd, Traefik. Đổi phiên bản Traefik hay file service vẫn chạy `install.sh agent`.
+
+Quay về bản cũ (trên server site):
+```bash
+sudo cp /opt/bmcproxy/agent-data/agent-backup-<thời gian>/* /opt/bmcproxy/ && sudo systemctl restart bmcproxy-agent
+```
