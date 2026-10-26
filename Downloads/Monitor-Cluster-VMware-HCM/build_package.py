@@ -41,6 +41,8 @@ with zipfile.ZipFile(OUT, "w") as z:
     # script sinh dashboard (tu them cluster moi tu Prometheus, day len Grafana) - chay duoc tren server
     add(z, NAME + "/make_dashboard.py",
         open(os.path.join(HERE, "make_dashboard.py"), "rb").read().replace(bytes([13, 10]), bytes([10])))
+    add(z, NAME + "/install_auto_dashboard.sh",
+        open(os.path.join(HERE, "install_auto_dashboard.sh"), "rb").read().replace(bytes([13, 10]), bytes([10])))
     n = 0
     with zipfile.ZipFile(VENDOR_ZIP) as vz:
         for i in vz.infolist():
