@@ -4,9 +4,20 @@
 Chay:  python make_dashboard.py            -> ghi vmware_cluster_hcm_grafana.json (+ ban trong vmware-cluster-exporter/)
 Doi nguong mau: sua bang THRESHOLDS ben duoi roi chay lai, import lai Grafana (Overwrite).
 Du lieu: metric vmware_cluster_* cua vmware-cluster-exporter (rieng, khong dung esxi-host-exporter).
+
+Tu them pool / cluster moi (moi cluster 1 khoi 15 o, giong cac cluster cu):
+  python3 make_dashboard.py --prometheus http://<ip>:9090
+      -> hoi Prometheus danh sach cluster dang co metric vmware_cluster_hosts, them cluster moi vao cuoi
+  GRAFANA_TOKEN=<service account token> python3 make_dashboard.py --prometheus http://<ip>:9090       --grafana http://<ip-grafana>:3000
+      -> them nua: day thang len Grafana (ghi de dashboard uid vmware-cluster-hcm). Dat cron de tu dong.
+Chi dung thu vien chuan Python 3 (chay duoc tren server Linux).
 """
+import argparse
 import json
 import os
+import sys
+import urllib.parse
+import urllib.request
 
 TITLE = "VMWARE CLUSTER HCM"
 PROM_DS = "prometheus-all"  # ten datasource Prometheus tren Grafana
@@ -113,6 +124,40 @@ def tile_panel(pid, cluster, x, y, w, tile):
     }
 
 
+def prometheus_clusters(url):
+    """Ten cac cluster dang co so lieu tren Prometheus (label cluster cua vmware_cluster_hosts)."""
+    q = urllib.parse.urlencode({"match[]": "vmware_cluster_hosts"})
+    with urllib.request.urlopen("%s/api/v1/label/cluster/values?%s" % (url.rstrip("/"), q), timeout=20) as r:
+        data = json.load(r)
+    if data.get("status") != "success":
+        sys.exit("Prometheus tra loi loi: %s" % data)
+    return data["data"]
+
+
+def push_grafana(url, token, dash, folder_uid=None):
+    body = {"dashboard": dict(dash, id=None), "overwrite": True,
+            "message": "make_dashboard.py: %d cluster" % len(CLUSTERS)}
+    if folder_uid:
+        body["folderUid"] = folder_uid
+    req = urllib.request.Request(url.rstrip("/") + "/api/dashboards/db", data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+ap = argparse.ArgumentParser(description="Sinh dashboard Grafana VMWARE CLUSTER HCM")
+ap.add_argument("--prometheus", help="URL Prometheus de tu tim cluster moi, vd http://10.16.16.x:9090")
+ap.add_argument("--grafana", help="URL Grafana de day dashboard len (token lay tu bien GRAFANA_TOKEN)")
+ap.add_argument("--folder-uid", help="UID thu muc Grafana (bo trong = giu thu muc hien tai / General)")
+ap.add_argument("--out", help="Thu muc ghi file JSON (mac dinh canh script)")
+args = ap.parse_args()
+if args.prometheus:
+    found = prometheus_clusters(args.prometheus)
+    new = sorted(c for c in found if c not in CLUSTERS)
+    if new:
+        print("Cluster moi tu Prometheus:", ", ".join(new))
+    CLUSTERS += new  # cluster cu giu nguyen thu tu, cluster moi them vao cuoi
+
 panels = [{"id": 1, "type": "row", "title": TITLE, "collapsed": False,
            "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}, "panels": []}]
 block_w = 24 // PER_ROW
@@ -150,9 +195,17 @@ dash = {
     "panels": panels,
 }
 
-here = os.path.dirname(os.path.abspath(__file__))
-for out in (os.path.join(here, "vmware_cluster_hcm_grafana.json"),
-            os.path.join(here, "vmware-cluster-exporter", "vmware_cluster_hcm_grafana.json")):
+here = args.out or os.path.dirname(os.path.abspath(__file__))
+outs = [os.path.join(here, "vmware_cluster_hcm_grafana.json")]
+if not args.out and os.path.isdir(os.path.join(here, "vmware-cluster-exporter")):
+    outs.append(os.path.join(here, "vmware-cluster-exporter", "vmware_cluster_hcm_grafana.json"))
+for out in outs:
     with open(out, "w", encoding="utf-8") as f:
         json.dump(dash, f, ensure_ascii=False, indent=2)
     print("Da ghi", out, "-", len(CLUSTERS), "cluster x", len(TILES), "o")
+if args.grafana:
+    token = os.environ.get("GRAFANA_TOKEN")
+    if not token:
+        sys.exit("Thieu bien moi truong GRAFANA_TOKEN (service account token, quyen Editor)")
+    r = push_grafana(args.grafana, token, dash, args.folder_uid)
+    print("Da day len Grafana:", r.get("status"), r.get("url"))

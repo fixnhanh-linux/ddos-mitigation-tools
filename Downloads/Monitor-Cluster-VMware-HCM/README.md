@@ -191,3 +191,28 @@ Item chính `vmc.metrics` (1 phút, không lưu lịch sử) → các item phụ
 | Exporter không lấy được dữ liệu vCenter / không đọc được /metrics / số liệu cũ > 10 phút | High / High / Warning | `{$VMC.NODATA}` 5m |
 
 Đổi ngưỡng riêng 1 cluster bằng macro context trên host, ví dụ `{$VMC.HOST.CPU.CRIT:"POOL17"}` = 60.
+
+## Thêm pool / cluster mới vào dashboard
+
+Mỗi cluster mới cũng có một khối 15 ô giống các cluster cũ (4 cột × 4 hàng, 3 cluster / hàng); khối mới
+được thêm vào cuối. `make_dashboard.py` (có trong gói, chỉ cần Python 3) hỏi Prometheus xem cluster nào đang có
+metric `vmware_cluster_hosts`, rồi sinh lại dashboard.
+
+1. Cài exporter cho vCenter mới (`./install.sh`, port tiếp theo, ví dụ 9825) và thêm target vào
+   `/etc/prometheus/scrape_configs/vmware-cluster.yml`.
+2. Sinh lại dashboard rồi import (Overwrite):
+
+```bash
+python3 /home/vmware-cluster-exporter/make_dashboard.py --prometheus http://<ip-prometheus>:9090
+```
+
+3. Hoặc để script tự đẩy lên Grafana (cần service account token quyền Editor, tạo ở Administration → Service
+   accounts), chạy tay hoặc đặt cron 30 phút một lần:
+
+```bash
+GRAFANA_TOKEN='<token>' python3 /home/vmware-cluster-exporter/make_dashboard.py --prometheus http://<ip-prometheus>:9090 --grafana http://<ip-grafana>:3000
+```
+
+Đẩy lên Grafana sẽ ghi đè dashboard uid `vmware-cluster-hcm`: chỉnh sửa tay trên Grafana (đổi tên, kéo ô) sẽ mất,
+nên sửa trong `make_dashboard.py` thay vì sửa trên Grafana. Cluster không còn số liệu vẫn giữ khối (hiện "–"); bỏ
+hẳn thì xoá tên khỏi `CLUSTERS`.
