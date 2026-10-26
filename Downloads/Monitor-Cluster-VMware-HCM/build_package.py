@@ -39,9 +39,8 @@ with zipfile.ZipFile(OUT, "w") as z:
                 data = data.replace(b"\r\n", b"\n")  # bash/systemd tren Linux khong chiu CRLF
             add(z, NAME + "/" + os.path.relpath(p, SRC).replace(os.sep, "/"), data)
     # script sinh dashboard (tu them cluster moi tu Prometheus, day len Grafana) - chay duoc tren server
-    add(z, NAME + "/make_dashboard.py", open(os.path.join(HERE, "make_dashboard.py"), "rb").read().replace(b"
-", b"
-"))
+    add(z, NAME + "/make_dashboard.py",
+        open(os.path.join(HERE, "make_dashboard.py"), "rb").read().replace(bytes([13, 10]), bytes([10])))
     n = 0
     with zipfile.ZipFile(VENDOR_ZIP) as vz:
         for i in vz.infolist():
