@@ -65,10 +65,12 @@ VALUEMAPS = {
 }
 
 
-def trig(name, expr, priority, desc="", depends=None):
+def trig(name, expr, priority, desc="", depends=None, opdata=""):
     # UUID tinh theo bieu thuc voi ten template cu -> doi ten template khong tao trigger trung khi import
     t = {"uuid": uid("trigger", expr.replace("/%s/" % TPL, "/%s/" % TPL_UUID_NAME)), "expression": expr,
          "name": name, "priority": priority}
+    if opdata:
+        t["opdata"] = opdata
     if desc:
         t["description"] = desc
     if depends:
@@ -207,9 +209,12 @@ def item_prototypes():
                                            "{$VMC.MEM.WARN}", "{$VMC.MEM.CRIT}", "min(%s,5m)"))
     add("vmc.cluster.vsan.pused", two_level("vSAN used", k("vmc.cluster.vsan.pused"),
                                             "{$VMC.VSAN.WARN}", "{$VMC.VSAN.CRIT}", "last(%s)"))
+    # Ten canh bao ghi luon dung luong con phai resync (Zabbix tu doi don vi: KB/MB/GB/TB)
     add("vmc.cluster.vsan.resync.bytes", [trig(
-        "Cluster %s: vSAN resync running longer than {$VMC.RESYNC.TIME}" % C,
-        "min(%s,{$VMC.RESYNC.TIME})>0" % ref(k("vmc.cluster.vsan.resync.bytes")), "WARNING")])
+        "Cluster %s: vSAN resync {ITEM.LASTVALUE} remaining, running longer than {$VMC.RESYNC.TIME}" % C,
+        "min(%s,{$VMC.RESYNC.TIME})>0" % ref(k("vmc.cluster.vsan.resync.bytes")), "WARNING",
+        desc="vSAN is still resyncing data. The name and operational data show how much is left to resync.",
+        opdata="Remaining: {ITEM.LASTVALUE}")])
     return out
 
 
