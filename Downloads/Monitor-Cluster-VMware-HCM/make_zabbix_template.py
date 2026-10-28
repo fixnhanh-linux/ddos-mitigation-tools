@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sinh template Zabbix 6.0 "VMware Cluster HCM by vmware-cluster-exporter".
+"""Sinh template Zabbix 6.0 "VMware Cluster HCM By VMware Cluster Exporter".
 
 Chay:  python make_zabbix_template.py   -> ghi zabbix_template_vmware_cluster_hcm.yaml
 Moi host Zabbix = 1 instance exporter (pool18 9821, pool25 9822, pool6 9823, core 9824):
@@ -9,11 +9,13 @@ Nguong trigger = macro (giong nguong mau dashboard Grafana), doi theo tung clust
 UUID sinh co dinh tu key -> import lai (cap nhat) khong tao trung.
 """
 import os
+import re
 import uuid
 
 import yaml
 
-TPL = "VMware Cluster HCM by vmware-cluster-exporter"
+TPL = "VMware Cluster HCM By VMware Cluster Exporter"
+TPL_UUID_NAME = "VMware Cluster HCM by vmware-cluster-exporter"  # ten cu: giu UUID -> import de len template dang dung
 GROUP = "Templates/VMware"
 NS = uuid.UUID("6b1f3c4e-8a52-4d0e-9a6c-5e7d2f1b0c93")
 C = "{#CLUSTER}"
@@ -62,7 +64,9 @@ VALUEMAPS = {
 
 
 def trig(name, expr, priority, desc="", depends=None):
-    t = {"uuid": uid("trigger", expr), "expression": expr, "name": name, "priority": priority}
+    # UUID tinh theo bieu thuc voi ten template cu -> doi ten template khong tao trigger trung khi import
+    t = {"uuid": uid("trigger", expr.replace("/%s/" % TPL, "/%s/" % TPL_UUID_NAME)), "expression": expr,
+         "name": name, "priority": priority}
     if desc:
         t["description"] = desc
     if depends:
@@ -279,7 +283,7 @@ def clean(items):
 
 
 template = {
-    "uuid": uid("template", TPL), "template": TPL, "name": TPL,
+    "uuid": uid("template", TPL_UUID_NAME), "template": TPL, "name": TPL,
     "description": "Per-cluster VMware totals from vmware-cluster-exporter (vmware_cluster_* metrics).\n"
                    "One host per exporter instance: set macro {$VMC.PORT} (9821 pool18, 9822 pool25, 9823 pool6, "
                    "9824 core) and an interface with IP 10.16.16.38.\n"
@@ -305,6 +309,31 @@ template = {
 doc = {"zabbix_export": {"version": "6.0", "date": "2026-10-17T00:00:00Z",
                          "groups": [{"uuid": uid("group", GROUP), "name": GROUP}],
                          "templates": [template]}}
+
+
+def title(s):
+    """Viet hoa chu dau moi tu; giu nguyen macro {...}, duong dan /..., ten rieng kieu vSAN / vCenter."""
+    def word(t):
+        if not t.strip() or t.startswith(("{", "/")) or re.match(r"^v[A-Z]", t):
+            return t
+        return re.sub(r"(^|[(\-])([a-z])", lambda m: m.group(1) + m.group(2).upper(), t)
+    return "".join(word(t) for t in re.split(r"(\s+)", s))
+
+
+def title_names(obj, skip=False):
+    """Ap title() cho moi truong name (item, trigger, phu thuoc trigger, graph, LLD), tru group va value map."""
+    if isinstance(obj, dict):
+        for key, v in obj.items():
+            if key == "name" and isinstance(v, str) and not skip:
+                obj[key] = title(v)
+            else:
+                title_names(v, skip=key in ("groups", "valuemaps", "valuemap"))
+    elif isinstance(obj, list):
+        for v in obj:
+            title_names(v, skip)
+
+
+title_names(doc)
 
 
 class Dumper(yaml.SafeDumper):
