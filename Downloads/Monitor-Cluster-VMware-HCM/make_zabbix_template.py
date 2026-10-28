@@ -53,6 +53,8 @@ MACROS = [
     ("{$VMC.UPTIME.MAX}", "180d", "Host uptime above this -> Info (needs patching)"),
     ("{$VMC.RESYNC.TIME}", "30m", "vSAN resync running longer than this -> Warning"),
     ("{$VMC.NODATA}", "5m", "No data from /metrics for this long -> High"),
+    ("{$VMC.CLUSTER.MATCHES}", ".*", "Discover only clusters matching this regex, e.g. ^POOL18-XD$ or ^(POOL17|CORE)$"),
+    ("{$VMC.CLUSTER.NOT_MATCHES}", "CHANGE_IF_NEEDED", "Skip clusters matching this regex, e.g. ^POOL17$"),
 ]
 
 VALUEMAPS = {
@@ -296,6 +298,10 @@ template = {
         "lifetime": "7d",
         "preprocessing": [{"type": "PROMETHEUS_TO_JSON", "parameters": ["vmware_cluster_hosts"]}],
         "lld_macro_paths": [{"lld_macro": C, "path": "$.labels.cluster"}],
+        # Loc cluster theo host: 1 exporter thay nhieu cluster ma host Zabbix chi can 1 (hoac bo bot)
+        "filter": {"evaltype": "AND", "conditions": [
+            {"macro": C, "value": "{$VMC.CLUSTER.MATCHES}", "formulaid": "A"},
+            {"macro": C, "value": "{$VMC.CLUSTER.NOT_MATCHES}", "operator": "NOT_MATCHES_REGEX", "formulaid": "B"}]},
         "item_prototypes": clean(item_prototypes()),
         "trigger_prototypes": trigger_prototypes(),
         "graph_prototypes": graph_prototypes(),
