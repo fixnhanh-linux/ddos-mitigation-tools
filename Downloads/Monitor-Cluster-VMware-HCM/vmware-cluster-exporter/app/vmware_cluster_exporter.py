@@ -40,7 +40,7 @@ from pyVim.connect import Disconnect, SmartConnect
 from pyVmomi import SoapStubAdapter, VmomiSupport, vim, vmodl
 
 # Tang moi lan phat hanh goi zip; kiem tra ban dang chay: curl -s localhost:9821/metrics | grep build_info
-VERSION = "2026.10.16-4"
+VERSION = "2026.10.28-1"
 
 SLOW_INTERVAL = int(os.environ.get("VC_SLOW_INTERVAL", 300))
 
@@ -155,11 +155,15 @@ def collect(vc, user, pwd, cluster_filter, cache):
         if vsan_cl:
             try:
                 obj_sys = vsan_mo(si, vc, ctx, vim.cluster.VsanObjectSystem, "vsan-cluster-object-system")
-                for c in vsan_cl:
+            except Exception as e:
+                obj_sys = None
+                print("Khong lay duoc resync: %s" % (getattr(e, "msg", None) or e), flush=True)
+            for c in vsan_cl if obj_sys else []:
+                try:  # tung cluster rieng: 1 cluster loi khong lam mat so lieu resync cua cac cluster khac
                     r = obj_sys.QuerySyncingVsanObjectsSummary(cluster=c)
                     resync[c.name] = (r.totalObjectsToSync or 0, r.totalBytesToSync or 0)
-            except Exception as e:
-                print("Khong lay duoc resync: %s" % (getattr(e, "msg", None) or e), flush=True)
+                except Exception as e:
+                    print("Khong lay duoc resync cluster %s: %s" % (c.name, getattr(e, "msg", None) or e), flush=True)
 
         out = []
         for o, p in cl_props:
