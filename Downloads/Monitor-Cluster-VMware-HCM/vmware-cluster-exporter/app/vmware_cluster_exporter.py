@@ -40,7 +40,7 @@ from pyVim.connect import Disconnect, SmartConnect
 from pyVmomi import SoapStubAdapter, VmomiSupport, vim, vmodl
 
 # Tang moi lan phat hanh goi zip; kiem tra ban dang chay: curl -s localhost:9821/metrics | grep build_info
-VERSION = "2026.10.28-1"
+VERSION = "2026.10.28-2"
 
 SLOW_INTERVAL = int(os.environ.get("VC_SLOW_INTERVAL", 300))
 
@@ -71,6 +71,38 @@ def vsan_api_version(vc, ctx):
         if VmomiSupport.versionIdMap.get(v) in supported:
             return v
     return "vim.version.version9"
+
+
+def _bytes_to_sync(o):
+    """Cong moi truong bytesToSync trong JSON resync cua vSAN (so hoac chuoi so)."""
+    if isinstance(o, dict):
+        n = 0
+        for k, v in o.items():
+            if k == "bytesToSync" and (isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit())):
+                n += int(v)
+            else:
+                n += _bytes_to_sync(v)
+        return n
+    if isinstance(o, list):
+        return sum(_bytes_to_sync(v) for v in o)
+    return 0
+
+
+def resync_legacy(cluster):
+    """vCenter / vSAN cu khong co QuerySyncingVsanObjectsSummary: hoi 1 host dang ket noi trong cluster
+    (vsanInternalSystem.QuerySyncingVsanObjects, cach RVC vsan.resync_dashboard dung). Tra ve (so object, bytes)."""
+    import json
+    last = None
+    for h in cluster.host:
+        try:
+            if h.runtime.connectionState != "connected":
+                continue
+            raw = h.configManager.vsanInternalSystem.QuerySyncingVsanObjects([])
+            dom = (json.loads(raw) or {}).get("dom_objects") or {}
+            return len(dom), _bytes_to_sync(dom)
+        except Exception as e:
+            last = e
+    raise last or RuntimeError("khong co host nao dang ket noi")
 
 
 def vsan_mo(si, vc, ctx, mo_type, mo_id):
@@ -158,10 +190,15 @@ def collect(vc, user, pwd, cluster_filter, cache):
             except Exception as e:
                 obj_sys = None
                 print("Khong lay duoc resync: %s" % (getattr(e, "msg", None) or e), flush=True)
-            for c in vsan_cl if obj_sys else []:
+            for c in vsan_cl:
                 try:  # tung cluster rieng: 1 cluster loi khong lam mat so lieu resync cua cac cluster khac
-                    r = obj_sys.QuerySyncingVsanObjectsSummary(cluster=c)
-                    resync[c.name] = (r.totalObjectsToSync or 0, r.totalBytesToSync or 0)
+                    try:
+                        if obj_sys is None:
+                            raise vmodl.fault.MethodNotFound()
+                        r = obj_sys.QuerySyncingVsanObjectsSummary(cluster=c)
+                        resync[c.name] = (r.totalObjectsToSync or 0, r.totalBytesToSync or 0)
+                    except vmodl.fault.MethodNotFound:  # vCenter / vSAN cu: hoi qua host
+                        resync[c.name] = resync_legacy(c)
                 except Exception as e:
                     print("Khong lay duoc resync cluster %s: %s" % (c.name, getattr(e, "msg", None) or e), flush=True)
 
