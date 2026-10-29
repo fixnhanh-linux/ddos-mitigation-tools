@@ -409,6 +409,14 @@ class Agent:
             self.collect_logs()
         elif name == "diagnose":
             self.diagnose_bmcs(cmd.get("bmcs") if isinstance(cmd, dict) else None)
+        elif name == "detect":
+            import gw_errpage
+            ip = str(cmd.get("ip", "")) if isinstance(cmd, dict) else ""
+            try:
+                r = gw_errpage.detect_bmc(ip)
+            except Exception as e:  # khong de 1 IP la lam hong vong lap lenh
+                r = {"ip": ip, "at": now_iso(), "error": f"lỗi khi dò: {e}"}
+            self.put_extra("detect", {**r, "req": cmd.get("req", "")})
         elif name == "restart_traefik":
             with self.lock:  # khong chen giua luc dang ap dung cau hinh
                 ok, out = run_cmd(self.cfg["traefik_restart_cmd"])

@@ -157,3 +157,123 @@ button{{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:9px 16p
 <button onclick="location.reload()">Thử lại</button>
 <p class="s">Kiểm tra lúc {html.escape(d.get('checked', ''))} từ server proxy.</p></div></body></html>"""
     return 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}, body.encode("utf-8")
+
+
+# --------------------------------------------------------------------------- do loai BMC
+# Web nhap IP -> agent (o cung mang BMC) thu cong web, doc trang chu / Redfish / chung chi -> doan mau (gw_templates)
+DETECT_WEB_PORTS = [(443, "https"), (8443, "https"), (80, "http")]
+DETECT_EXTRA_PORTS = [5900, 5901, 7578, 5120, 5123, 17990, 2068, 623]
+# (mau, hang, cac chuoi nhan dien - chu thuong). Thu tu = uu tien.
+DETECT_RULES = [
+    ("idrac", "Dell", ("idrac", "dell inc", "integrated dell remote access")),
+    ("ilo4-5", "HPE", ("integrated lights-out", "ilo 4", "ilo 5", "hewlett", '"hpe"')),
+    ("lenovo", "Lenovo", ("xclarity", "lenovo", "integrated management module")),
+    ("cisco-c220", "Cisco", ("cisco integrated management", "cimc", "cisco systems")),
+    ("supermicro", "Supermicro", ("supermicro", "super micro", "/cgi/login.cgi")),
+    ("qct-ami-java", "QCT / AMI", ("megarac", "american megatrends", "quanta", "qct", '"ami"')),
+]
+
+
+def _http_get(host, port, scheme, path, legacy, timeout=5):
+    """GET 1 trang (khong kiem chung chi). Tra ve (status, headers, body[:64K], cert DER) hoac None."""
+    import http.client
+    try:
+        if scheme == "https":
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            if legacy:
+                try:
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1
+                    ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+                except (ValueError, ssl.SSLError):
+                    pass
+            c = http.client.HTTPSConnection(host, port, timeout=timeout, context=ctx)
+        else:
+            c = http.client.HTTPConnection(host, port, timeout=timeout)
+        c.request("GET", path, headers={"User-Agent": "bmcproxy-detect", "Accept": "*/*"})
+        r = c.getresponse()
+        cert = c.sock.getpeercert(binary_form=True) or b"" if scheme == "https" and c.sock else b""
+        body = r.read(65536)
+        c.close()
+        return r.status, {k.lower(): v for k, v in r.getheaders()}, body, cert
+    except (OSError, ssl.SSLError, http.client.HTTPException):
+        return None
+
+
+def detect_bmc(ip):
+    """Doan loai BMC theo IP: cong web, TLS cu, tieu de trang, Redfish, chung chi."""
+    import json
+    import re
+    out = {"ip": ip, "at": now_iso(), "ping": _ping(ip), "evidence": [], "open_ports": []}
+    web = None
+    for port, scheme in DETECT_WEB_PORTS:
+        up, ms, _ = _tcp(ip, port, timeout=2)
+        if not up:
+            continue
+        out["open_ports"].append(port)
+        if web:
+            continue
+        legacy, info = False, ""
+        if scheme == "https":
+            ok, info = _tls(ip, port, False)
+            if not ok:
+                ok, info = _tls(ip, port, True)
+                legacy = ok
+            if not ok:
+                continue
+        web = {"port": port, "scheme": scheme, "tls": info, "legacy_tls": legacy, "ms": ms}
+    if not web:
+        out["error"] = ("IP không phản hồi (không ping được, không mở cổng web)" if out["ping"] is False
+                        else "Không thấy cổng web (443 / 8443 / 80) mở trên IP này")
+        return out
+    out["web"] = web
+
+    def get(path):
+        return _http_get(ip, web["port"], web["scheme"], path, web["legacy_tls"])
+
+    texts = []
+    home = get("/")
+    if home:
+        _, headers, body, cert = home
+        text = body.decode("utf-8", "replace")
+        m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+        out["title"] = html.unescape(m.group(1)).strip()[:120] if m else ""
+        out["server"] = headers.get("server", "")[:80]
+        texts += [text, out["server"], headers.get("location", "")]
+        # chuoi ASCII trong chung chi (to chuc / ten may) - vd "Dell Inc.", "Super Micro Computer"
+        texts += [s.decode("ascii") for s in re.findall(rb"[ -~]{4,}", cert)[:40]]
+    rf = get("/redfish/v1/")
+    if rf and rf[0] == 200:
+        try:
+            j = json.loads(rf[2].decode("utf-8", "replace"))
+            out["redfish"] = {k: j.get(k) for k in ("Vendor", "Product", "RedfishVersion") if j.get(k)}
+            texts.append(json.dumps(j))
+        except ValueError:
+            pass
+    blob = " ".join(t for t in texts if t).lower()
+    tpl = vendor = None
+    for key, name, marks in DETECT_RULES:
+        hit = [s for s in marks if s in blob]
+        if hit:
+            tpl, vendor = key, name
+            out["evidence"] += ['thấy "%s"' % s.strip('"') for s in hit[:3]]
+            break
+    if tpl == "idrac":
+        rg = get("/restgui/start.html")
+        if (rg and rg[0] == 200) or "/restgui" in blob:
+            tpl = "idrac9"
+            out["evidence"].append("có /restgui (giao diện iDRAC 9)")
+        elif web["legacy_tls"] or "idrac6" in blob:
+            tpl = "idrac6"
+            out["evidence"].append("chỉ bắt tay được TLS cũ" if web["legacy_tls"] else 'thấy "iDRAC6"')
+        else:
+            tpl = "idrac7-8"
+    if web["legacy_tls"]:
+        out["evidence"].append(f"cần TLS cũ ({web['tls']})")
+    out["template"], out["vendor"] = tpl, vendor
+    out["confidence"] = "cao" if tpl and len(out["evidence"]) >= 2 else "trung bình" if tpl else "không rõ"
+    for p in DETECT_EXTRA_PORTS:
+        if _tcp(ip, p, timeout=1)[0]:
+            out["open_ports"].append(p)
+    return out

@@ -29,7 +29,7 @@ from gw_common import (BMC_DEFAULTS, bmc_ports, parse_tcp_ports, DASHBOARD_DEFAU
                        SETTINGS_DEFAULTS, VERSION, GUEST_PATH, ValidationError, cert_info, check_password, totp_check, totp_new_secret, totp_uri,
                        clean_text, hash_password, hash_token, now_iso, read_json, to_port,
                        validate_bmc_fields, validate_settings_values, write_json)
-from gw_templates import (BUILTIN_TEMPLATES, all_templates, apply_template, export_csv, parse_rows,
+from gw_templates import (BUILTIN_TEMPLATES, RE_IPHOST, all_templates, apply_template, export_csv, parse_rows,
                           row_to_bmc, validate_template)
 from gw_render import DEFAULT_PARAMS, release_rev, render_bmc, render_files
 
@@ -1466,7 +1466,7 @@ def make_handler(app):
                              str(act.get("output", ""))[:300], site)
                     app.notifier.event("agent_update", ("✅ Đã cập nhật agent" if act.get("ok") else "❌ Cập nhật agent lỗi")
                                        + f" ở site {st.sites[site]['label']}", str(act.get("output", ""))[:500])
-                for k in ("logs", "diag", "action"):
+                for k in ("logs", "diag", "action", "detect"):
                     if isinstance(data.get(k), dict):
                         app.extra.setdefault(site, {})[k] = data.pop(k)
                 if isinstance(data.get("access"), list):
@@ -2139,7 +2139,7 @@ def make_handler(app):
             if method == "POST" and action == "command":
                 cmd_body = self.body_json()
                 name = str(cmd_body.get("name", ""))
-                if name not in ("import", "recheck", "clear_cache", "logs", "diagnose", "restart_traefik",
+                if name not in ("import", "recheck", "clear_cache", "logs", "diagnose", "detect", "restart_traefik",
                                 "restart_agent", "update_agent"):
                     raise ValidationError("Lệnh không hợp lệ")
                 if name in ("clear_cache", "logs", "restart_traefik", "restart_agent", "update_agent"):
@@ -2147,6 +2147,11 @@ def make_handler(app):
                 else:
                     app.need_edit(u, key)
                 cmd = {"name": name}
+                if name == "detect":  # do loai BMC theo IP (agent o cung mang BMC)
+                    ip = str(cmd_body.get("ip", "")).strip()
+                    if not RE_IPHOST.match(ip):
+                        raise ValidationError("IP / tên BMC không hợp lệ")
+                    cmd.update(ip=ip, req=secrets.token_hex(6))
                 if name == "update_agent":
                     info = agent_pkg_info()
                     if not info:
@@ -2159,7 +2164,7 @@ def make_handler(app):
                 with st.lock:
                     app.commands.setdefault(key, []).append(cmd)
                 st.audit(u["name"], f"command-{name}", "", key)
-                return self.send(200, {"queued": True, "online": app.online(key)})
+                return self.send(200, {"queued": True, "online": app.online(key), "req": cmd.get("req", "")})
             if method == "POST" and action == "install":
                 app.need_admin(u)
                 code = secrets.token_urlsafe(24)
@@ -2172,7 +2177,7 @@ def make_handler(app):
                 st.audit(u["name"], "site-install-code", "tạo lệnh cài agent (1 lần, 1 giờ)", key)
                 return self.send(200, {"code": code, "path": f"/install/{code}", "expires_in": INSTALL_TTL,
                                        "package": bool(self.agent_package()), "online": app.online(key)})
-            if method == "GET" and action in ("logs", "diag", "action"):
+            if method == "GET" and action in ("logs", "diag", "action", "detect"):
                 if action in ("logs", "action"):
                     app.need_admin(u)
                 return self.send(200, (app.extra.get(key) or {}).get(action) or {})
