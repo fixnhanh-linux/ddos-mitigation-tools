@@ -28,6 +28,7 @@ async function api(method, path, body) {
     opt.body = JSON.stringify(body);
   }
   const res = await fetch(BASE + "api/" + path, opt);
+  checkWebVersion(res.headers.get("X-Web-Version"));
   const ctype = res.headers.get("Content-Type") || "";
   const data = ctype.includes("json") ? await res.json() : await res.text();
   if (res.status === 401 && path !== "login") {
@@ -41,6 +42,18 @@ async function api(method, path, body) {
     throw e;
   }
   return data;
+}
+
+// Web vua duoc cap nhat (app.js / app.css khac ban dang chay) -> thanh nhac tai lai (khong tu tai, tranh mat form dang nhap)
+const WEB_VERSION = (document.querySelector('meta[name="web-version"]') || {}).content || "";
+function checkWebVersion(v) {
+  if (!v || !WEB_VERSION || v === WEB_VERSION || $("#update-bar") || $('script[src="__dev/reload.js"]')) return;  // dev tu tai lai
+  const bar = document.createElement("div");
+  bar.id = "update-bar";
+  bar.className = "update-bar";
+  bar.innerHTML = '<span>Web vừa được cập nhật bản mới.</span><button type="button" class="btn small primary">Tải lại</button>';
+  bar.querySelector("button").addEventListener("click", () => location.reload());
+  document.body.appendChild(bar);
 }
 
 function toast(msg, isError = false) {

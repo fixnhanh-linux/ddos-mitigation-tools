@@ -40,7 +40,7 @@ DEFAULT_PARAMS = {
 
 
 # Tang khi doi cach sinh file Traefik -> rev doi -> site hien "cho ap dung" de agent sinh lai file
-RENDER_VERSION = 10
+RENDER_VERSION = 11
 
 
 def release_rev(domain, settings, bmcs, dashboard=None):
@@ -210,6 +210,10 @@ def render_bmc(b, params):
         middlewares[f"{name}-err-{kind}"] = {"errors": {
             "status": ["502-504"], "service": f"{name}-errpage",
             "query": f"/__bmcgw/error?status={{status}}&port={b['port']}&kind={kind}"}}
+    # trang chu BMC tra 400 (iDRAC 9 Host Header Check / cookie qua lon) -> trang huong dan cach sua
+    middlewares[f"{name}-err-reject"] = {"errors": {
+        "status": ["400"], "service": f"{name}-errpage",
+        "query": f"/__bmcgw/error?status={{status}}&port={b['port']}&kind=reject"}}
 
     def chain(auth, kind="web"):
         return ["bmc-cors", "bmc-headers"] + ([f"{name}-auth"] if auth else []) + [f"{name}-err-{kind}", "bmc-retry"]
@@ -235,6 +239,19 @@ def render_bmc(b, params):
                 "Host": bhost if bport == default else f"{bhost}:{bport}"}}}
             services[name]["loadBalancer"]["passHostHeader"] = True
             routers[name]["middlewares"] = routers[name]["middlewares"] + [f"{name}-host"]
+    # Trang iDRAC 9 di qua agent: nhan ra QueryNotSupported / 400 -> trang huong dan (khong de JSON loi tho)
+    middlewares[f"{name}-page-tag"] = {"headers": {"customRequestHeaders": {"X-Bmcproxy-Page": str(b["port"])}}}
+    services[f"{name}-page"] = {"loadBalancer": {
+        "servers": [{"url": f"http://{params['auth_host']}:{params['auth_port']}"}], "passHostHeader": True}}
+    page_rule = "Path(`/restgui/start.html`) || Path(`/restgui/index.html`)"
+    if b["host_header"] != "client":
+        # Host = IP BMC: iDRAC chuyen huong / ve https://<IP noi bo>/... -> agent doi thanh ten mien proxy
+        page_rule = "Path(`/`) || " + page_rule
+    else:
+        routers[f"{name}-root"] = {"entryPoints": [ep_name(b["port"])], "rule": "Path(`/`)", "service": name,
+                                   "priority": 2700, "tls": {}, "middlewares": chain(b["auth"]) + [f"{name}-err-reject"]}
+    routers[f"{name}-page"] = {"entryPoints": [ep_name(b["port"])], "rule": page_rule, "service": f"{name}-page",
+                               "priority": 2800, "tls": {}, "middlewares": chain(b["auth"]) + [f"{name}-page-tag"]}
     if b["jsesp_cache"]:
         routers[f"{name}-jsesp"] = {
             "entryPoints": [ep_name(b["port"])],

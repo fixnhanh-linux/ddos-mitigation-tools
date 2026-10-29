@@ -1241,6 +1241,11 @@ Sửa (chọn 1):
    hoặc trên web iDRAC: **iDRAC Settings → Services → Web Server → Host Header Check = Disabled**.
    Reset iDRAC về mặc định thì phải làm lại; cách 1 không bị ảnh hưởng.
 
+Trang lỗi tự hướng dẫn (cần agent bản mới): truy cập qua proxy mà iDRAC trả `QueryNotSupported` (trang
+`/restgui/index.html`) hoặc `400 Bad Request` (trang `/`, `/restgui/start.html`) thì thay vì JSON / trang lỗi thô, người dùng
+thấy trang **"BMC … từ chối truy cập qua proxy"** kèm 3 cách sửa ở trên. BMC đặt Host = IP: iDRAC chuyển hướng `/` về
+`https://<IP nội bộ>/restgui/start.html` - agent tự đổi thành tên miền + cổng proxy.
+
 ### 33.3. `Bad Request … ErrorDocument` (400)
 
 Trình duyệt giữ cookie **theo tên miền, không theo cổng**: mọi BMC của một site dùng chung tên miền proxy (chỉ khác cổng)
@@ -1257,5 +1262,6 @@ Tài khoản khách hàng chỉ thấy **BMC** và **Cài đặt**.
 
 ### 33.5. Sau khi cập nhật web
 
-Trình duyệt có thể còn giữ giao diện cũ: bấm **Ctrl+F5** một lần.
+Link `app.js` / `app.css` có gắn mã nội dung (`app.js?v=…`) nên trình duyệt tự tải bản mới khi mở lại trang. Tab đang mở
+sẵn thấy thanh **"Web vừa được cập nhật bản mới · Tải lại"** (không tự tải lại để khỏi mất form đang nhập).
 

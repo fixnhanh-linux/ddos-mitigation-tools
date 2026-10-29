@@ -476,11 +476,18 @@ class DetectTest(unittest.TestCase):
                    "/restgui/start.html": (200, {}, "<title>iDRAC9</title>"),
                    "/redfish/v1/": (200, {}, json.dumps({"Product": "Integrated Dell Remote Access Controller"}))},
         "idrac7-8": {"/": (200, {}, "<title>iDRAC8 - Login</title>")},
+        # mau lay tu BMC that qua proxy (khong co ten hang tren trang chu / Redfish khoa)
+        "idrac6": {"/": (200, {}, "<title>iDRAC 6</title>")},
+        "qct-ami-java": {"/": (302, {"Location": "/index.html"}, "/home/x/ast2300evb_workspace/Build")},
         "ilo4-5": {"/": (200, {}, "<title>iLO 5</title> Integrated Lights-Out")},
         "lenovo": {"/": (200, {}, "<title>Lenovo XClarity Controller</title>")},
         "cisco-c220": {"/": (200, {}, "<title>Cisco Integrated Management Controller</title>")},
         "supermicro": {"/": (200, {}, '<form action="/cgi/login.cgi">')},
-        "qct-ami-java": {"/": (200, {"Server": "lighttpd"}, "<title>MegaRAC SP</title>")},
+        "qct-ami-java ": {"/": (200, {"Server": "lighttpd"}, "<title>MegaRAC SP</title>")},
+        "qct-ami-java  ": {"/": (200, {}, "<title>TYAN</title>")},
+        "idrac9 ": {"/": (302, {"Location": "/restgui/start.html"}, "")},
+        "idrac9  ": {"/": (400, {}, "<title>400 Bad Request</title> ... use an ErrorDocument to handle the request.")},
+        "idrac7-8 ": {"/": (302, {"Location": "/start.html"}, "<title>Moved Temporarily</title>")},
         None: {"/": (200, {}, "<title>Router</title>")},
     }
 
@@ -510,7 +517,7 @@ class DetectTest(unittest.TestCase):
                 finally:
                     srv.shutdown()
                     srv.server_close()
-                self.assertEqual(r.get("template"), expect, r)
+                self.assertEqual(r.get("template"), expect.strip() if expect else None, r)
                 self.assertEqual(r["web"]["port"], srv.server_address[1])
         finally:
             gw_errpage.DETECT_WEB_PORTS, gw_errpage.DETECT_EXTRA_PORTS = old
@@ -530,6 +537,100 @@ class DetectTest(unittest.TestCase):
         finally:
             gw_errpage.DETECT_WEB_PORTS, gw_errpage.DETECT_EXTRA_PORTS = old
 
+
+# ====================================================================== iDRAC tu choi qua proxy
+class RejectPageTest(unittest.TestCase):
+    """Trang iDRAC di qua agent: QueryNotSupported / 400 -> trang huong dan; chuyen huong ve IP noi bo -> ten mien proxy."""
+
+    QNS = json.dumps({"error": {"code": "Base.1.8.GeneralError", "@Message.ExtendedInfo": [
+        {"MessageId": "Base.1.8.QueryNotSupported"}]}})
+
+    @classmethod
+    def setUpClass(cls):
+        from gw_auth import AuthGateway, start_auth_server
+        test = cls
+
+        class FakeIdrac(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                own = self.headers.get("Host", "").startswith("127.0.0.1")  # Host Header Check cua iDRAC
+                path = self.path.split("?")[0]
+                if path == "/" and own:
+                    code, hdr, body = 302, {"Location": f"https://127.0.0.1:{test.bport}/restgui/start.html"}, ""
+                elif path == "/":
+                    code, hdr, body = 400, {}, "<title>400 Bad Request</title><h1>Bad Request</h1> ErrorDocument"
+                elif path == "/restgui/index.html":
+                    code, hdr, body = (200, {"Content-Type": "text/html"}, "<html>iDRAC</html>") if own \
+                        else (200, {"Content-Type": "application/json"}, test.QNS)
+                else:
+                    code, hdr, body = 200, {"Content-Type": "text/html", "Set-Cookie": "-http-session-=1"}, "<html>login</html>"
+                self.send_response(code)
+                for k, v in hdr.items():
+                    self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(body.encode())
+
+            def log_message(self, *a):
+                pass
+
+        cls.bmc_srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeIdrac)
+        cls.bport = cls.bmc_srv.server_address[1]
+        threading.Thread(target=cls.bmc_srv.serve_forever, daemon=True).start()
+        up = f"http://127.0.0.1:{cls.bport}"
+        cls.gw = AuthGateway(lambda: {"bmcs": [
+            {"port": 8101, "enabled": True, "upstream": up, "host_header": "client", "note": "R640"},
+            {"port": 8102, "enabled": True, "upstream": up, "host_header": "upstream", "note": "R740"}]})
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        cls.aport = s.getsockname()[1]
+        s.close()
+        cls.auth_srv = start_auth_server(cls.gw, "127.0.0.1", cls.aport)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.bmc_srv.shutdown()
+        cls.auth_srv.shutdown()
+
+    def page(self, port, path):
+        return req(self.aport, "GET", path, None, {"X-Bmcproxy-Page": str(port), "Host": f"proxy.example.net:{port}"})
+
+    def test_query_not_supported_shows_fix(self):
+        s, _, body = self.page(8101, "/restgui/index.html?abc123")
+        self.assertEqual(s, 200)
+        text = body.decode()
+        self.assertIn("QueryNotSupported", text)
+        self.assertIn("racadm set iDRAC.WebServer.HostHeaderCheck Disabled", text)
+        self.assertIn("Host header = IP của BMC", text)
+
+    def test_host_ip_passthrough_and_redirect(self):
+        # Host = IP BMC: trang that tra nguyen, chuyen huong ve IP noi bo -> ten mien proxy
+        s, _, body = self.page(8102, "/restgui/index.html?abc123")
+        self.assertEqual((s, body), (200, b"<html>iDRAC</html>"))
+        s, h, _ = self.page(8102, "/")
+        self.assertEqual(s, 302)
+        self.assertEqual(h["Location"], "https://proxy.example.net:8102/restgui/start.html")
+        s, h, body = self.page(8102, "/restgui/start.html")
+        self.assertEqual((s, body), (200, b"<html>login</html>"))
+        self.assertIn("-http-session-", h.get("Set-Cookie", ""))
+
+    def test_root_400_error_page(self):
+        import gw_errpage
+        code, _, body = gw_errpage.page(self.gw._bmc(8101), "400", "reject")
+        self.assertEqual(code, 200)
+        self.assertIn("Host Header Check", body.decode())
+        self.assertTrue(gw_errpage.is_reject(400, b"<h1>Bad Request</h1>"))
+        self.assertFalse(gw_errpage.is_reject(200, b"<html>ok</html>"))
+
+    def test_render_routes(self):
+        import gw_render
+        y = gw_render.render_bmc({"site": "hcm", "port": 8101, "upstream": "https://10.0.0.5", "host_header": "client"},
+                                 gw_render.DEFAULT_PARAMS)
+        self.assertIn("bmc-8101-root", y)
+        self.assertIn("kind=reject", y)
+        self.assertIn("Path(`/restgui/index.html`)", y)
+        y = gw_render.render_bmc({"site": "hcm", "port": 8102, "upstream": "https://10.0.0.5", "host_header": "upstream"},
+                                 gw_render.DEFAULT_PARAMS)
+        self.assertNotIn("bmc-8102-root", y)
+        self.assertIn("Path(`/`) || Path(`/restgui/start.html`)", y)
 
 if __name__ == "__main__":
     unittest.main()

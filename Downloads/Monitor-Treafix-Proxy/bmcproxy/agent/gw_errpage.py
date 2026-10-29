@@ -117,11 +117,58 @@ MESSAGES = {
 }
 
 
+RACADM_HOSTCHECK = "racadm set iDRAC.WebServer.HostHeaderCheck Disabled"
+
+
+def is_reject(status, body):
+    """BMC (iDRAC 9) tu choi request di qua proxy: 400 'Bad Request ... ErrorDocument' hoac JSON QueryNotSupported."""
+    head = body[:4096]
+    if b"QueryNotSupported" in head:
+        return "query"
+    if status == 400 and b"Bad Request" in head:
+        return "host400"
+    return ""
+
+
+def reject_page(bmc, status, why):
+    """Trang huong dan khi iDRAC tu choi truy cap qua proxy (Host Header Check / cookie qua lon)."""
+    port = bmc["port"] if bmc else ""
+    note = html.escape((bmc or {}).get("note") or "")
+    host_ip = (bmc or {}).get("host_header") == "upstream"
+    title = ("iDRAC báo QueryNotSupported khi đi qua proxy" if why == "query"
+             else "BMC trả 400 Bad Request khi đi qua proxy")
+    hostfix = ("" if host_ip else
+               "<li><b>Trên web quản trị</b>: BMC " + str(port) + " → Tương thích BMC → <b>Host header = IP của BMC "
+               "(iDRAC 9)</b> → Lưu → <b>Áp dụng</b> (nhiều máy: tick chọn → <b>Host = IP BMC</b>).</li>")
+    steps = (hostfix +
+             "<li><b>Trên iDRAC</b> (SSH vào iDRAC): <code>" + RACADM_HOSTCHECK + "</code> - hoặc web iDRAC → "
+             "iDRAC Settings → Services → Web Server → Host Header Check = Disabled.</li>"
+             "<li>Vẫn lỗi: cookie của tên miền proxy quá lớn (mọi BMC cùng tên miền). Mở cửa sổ ẩn danh "
+             "(Ctrl+Shift+N) hoặc xoá cookie của tên miền này rồi thử lại.</li>")
+    desc = ("iDRAC 9 bật <b>Host Header Check</b>: chỉ nhận truy cập có Host là IP / tên của chính nó, "
+            "không nhận tên miền proxy" + (" (BMC này đã đặt Host = IP, nên nhiều khả năng do cookie quá lớn)" if host_ip else "")
+            + ". BMC vẫn hoạt động bình thường - vào thẳng IP thì được.")
+    body = f"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>BMC {port} từ chối truy cập qua proxy</title>
+<style>body{{font:15px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;display:grid;place-items:center;min-height:100vh}}
+.b{{max-width:640px;padding:28px;margin:16px;background:#111c33;border:1px solid #1e2b47;border-radius:14px}}
+h1{{font-size:21px;margin:0 0 6px;color:#fcd34d}}.s{{color:#94a3b8;font-size:13px}}p{{line-height:1.55}}
+li{{margin:7px 0;line-height:1.5}}code{{color:#7dd3fc;word-break:break-all}}
+button{{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-size:14px;cursor:pointer}}</style></head>
+<body><div class="b"><div class="s">IPMI / BMC {port}{' · ' + note if note else ''} · HTTP {html.escape(str(status))}</div>
+<h1>{html.escape(title)}</h1><p>{desc}</p>
+<b>Cách xử lý</b><ol>{steps}</ol>
+<button onclick="location.reload()">Thử lại</button></div></body></html>"""
+    return 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}, body.encode("utf-8")
+
+
 def page(bmc, status, kind="web", maint=None):
     """Tra ve (ma HTTP, header, bytes). Traefik giu nguyen ma loi goc (502/503/504)."""
     if not bmc:
         body = "<h1>Bad Gateway</h1>".encode()
         return 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}, body
+    if kind == "reject":  # BMC tra 400 o trang chu (middleware errors 400 cua router trang chu)
+        return reject_page(bmc, status, "host400")
     url = bmc["console_upstream"] if kind == "console" and bmc.get("console_upstream") else bmc["upstream"]
     d = cached(bmc["port"], kind, url, bmc.get("legacy_tls"))
     title, desc, steps = MESSAGES[d["code"]]
@@ -170,7 +217,17 @@ DETECT_RULES = [
     ("lenovo", "Lenovo", ("xclarity", "lenovo", "integrated management module")),
     ("cisco-c220", "Cisco", ("cisco integrated management", "cimc", "cisco systems")),
     ("supermicro", "Supermicro", ("supermicro", "super micro", "/cgi/login.cgi")),
-    ("qct-ami-java", "QCT / AMI", ("megarac", "american megatrends", "quanta", "qct", '"ami"')),
+    ("qct-ami-java", "QCT / AMI", ("megarac", "american megatrends", "quanta", "qct", '"ami"', "<title>tyan</title>",
+                                   "asrock rack")),
+]
+# Khong thay ten hang: dau hieu rieng (lay tu BMC that qua proxy)
+DETECT_WEAK = [
+    ("idrac9", "Dell", "/restgui"),                 # iDRAC 9: / -> /restgui/start.html
+    ("idrac7-8", "Dell", "/start.html"),            # iDRAC 7/8: / -> /start.html
+    ("qct-ami-java", "QCT / AMI", "ast2300"),       # chip ASPEED (BMC AMI doi cu)
+    ("qct-ami-java", "QCT / AMI", "ast2400"),
+    ("qct-ami-java", "QCT / AMI", "ast2500"),
+    ("idrac9", "Dell", "errordocument"),            # Apache cua iDRAC tra 400 khi Host Header Check chan
 ]
 
 
@@ -234,10 +291,16 @@ def detect_bmc(ip):
 
     texts = []
     home = get("/")
+    if home and home[0] in (301, 302, 303, 307, 308):  # theo 1 lan chuyen huong trong cung BMC (lay tieu de trang that)
+        m = re.match(r"^(?:https?://[^/]+)?(/\S*)$", home[1].get("location", ""))
+        nxt = get(m.group(1)) if m else None
+        if nxt:
+            texts.append(nxt[2].decode("utf-8", "replace"))
+            out["evidence_redirect"] = m.group(1)[:80]
     if home:
         _, headers, body, cert = home
         text = body.decode("utf-8", "replace")
-        m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+        m = re.search(r"<title[^>]*>(.*?)</title>", " ".join(texts[:1]) + text, re.I | re.S)
         out["title"] = html.unescape(m.group(1)).strip()[:120] if m else ""
         out["server"] = headers.get("server", "")[:80]
         texts += [text, out["server"], headers.get("location", "")]
@@ -259,14 +322,20 @@ def detect_bmc(ip):
             tpl, vendor = key, name
             out["evidence"] += ['thấy "%s"' % s.strip('"') for s in hit[:3]]
             break
+    if not tpl:
+        for key, name, mark in DETECT_WEAK:
+            if mark in blob:
+                tpl, vendor = key, name
+                out["evidence"].append(f'thấy "{mark}"')
+                break
     if tpl == "idrac":
         rg = get("/restgui/start.html")
         if (rg and rg[0] == 200) or "/restgui" in blob:
             tpl = "idrac9"
             out["evidence"].append("có /restgui (giao diện iDRAC 9)")
-        elif web["legacy_tls"] or "idrac6" in blob:
+        elif web["legacy_tls"] or re.search(r"idrac\s?6", blob):
             tpl = "idrac6"
-            out["evidence"].append("chỉ bắt tay được TLS cũ" if web["legacy_tls"] else 'thấy "iDRAC6"')
+            out["evidence"].append("chỉ bắt tay được TLS cũ" if web["legacy_tls"] else 'thấy "iDRAC 6"')
         else:
             tpl = "idrac7-8"
     if web["legacy_tls"]:

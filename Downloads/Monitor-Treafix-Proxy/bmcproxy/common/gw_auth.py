@@ -287,6 +287,32 @@ def make_auth_handler(gateway):
             if self.command != "HEAD":
                 self.wfile.write(body)
 
+        def serve_page(self, tag):
+            """Trang chu / trang dang nhap iDRAC di qua agent: BMC tu choi (400 / QueryNotSupported) -> trang huong dan;
+            chuyen huong ve IP noi bo -> doi thanh ten mien proxy. Con lai tra nguyen ven."""
+            import gw_errpage
+            from gw_java import fetch_raw
+            bmc = gateway._bmc(int(tag)) if tag.isdigit() else None
+            try:
+                if not bmc:
+                    raise LookupError("không có BMC")
+                code, headers, body = fetch_raw(bmc, self.path, self.headers, self.headers.get("Host") or "")
+                why = gw_errpage.is_reject(code, body)
+                if why:
+                    code, headers, body = gw_errpage.reject_page(bmc, code, why)
+            except Exception as e:  # BMC loi ket noi -> trang loi IPMI nhu khi Traefik gap 502
+                sys.stderr.write(f"page {tag}: {e}\n")
+                code, headers, body = gw_errpage.page(bmc, "502") if bmc else (
+                    404, {"Content-Type": "text/plain; charset=utf-8"}, b"Not found")
+            self.send_response(code)
+            for k, v in headers.items():
+                for one in (v if isinstance(v, list) else [v]):
+                    self.send_header(k, one)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
         def serve_error(self):
             """Trang loi IPMI cho middleware errors cua Traefik (BMC tra 502/503/504)."""
             import gw_errpage
@@ -353,6 +379,9 @@ def make_auth_handler(gateway):
                 return self.serve_error()
             if urllib.parse.urlparse(self.path).path == GUEST_PATH and (self.headers.get("X-Bmcproxy-Bmc") or "").strip():
                 return self.serve_guest(self.headers["X-Bmcproxy-Bmc"].strip())
+            page_tag = (self.headers.get("X-Bmcproxy-Page") or "").strip()
+            if page_tag and self.command in ("GET", "HEAD"):
+                return self.serve_page(page_tag)
             m = re.match(r"^/auth/(\d{1,5})$", urllib.parse.urlparse(self.path).path)
             tag = (self.headers.get("X-Bmcproxy-Bmc") or "").strip()
             if not m and tag:

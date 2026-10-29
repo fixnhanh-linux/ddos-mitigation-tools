@@ -141,6 +141,26 @@ DEV_RELOAD_JS = b"""(function () {
 """
 
 
+_web_ver = {"key": None}
+
+
+def web_version():
+    """Ma noi dung app.js / app.css (doi khi cap nhat web) -> gan vao link tai file, trinh duyet khong dung ban cu."""
+    names = ("app.js", "app.css")
+    try:
+        key = tuple(os.stat(os.path.join(WEB_DIR, n)).st_mtime_ns for n in names)
+    except OSError:
+        return {"app.js": "", "app.css": "", "v": ""}
+    if _web_ver["key"] != key:
+        import hashlib
+        hs = {}
+        for n in names:
+            with open(os.path.join(WEB_DIR, n), "rb") as f:
+                hs[n] = hashlib.sha256(f.read()).hexdigest()[:10]
+        _web_ver.update(key=key, val={**hs, "v": hs["app.js"] + hs["app.css"]})
+    return _web_ver["val"]
+
+
 def dev_version():
     def mt(name):
         try:
@@ -1305,6 +1325,7 @@ def make_handler(app):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Web-Version", web_version()["v"])  # trang dang mo so voi ban moi -> bao tai lai
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -1388,6 +1409,11 @@ def make_handler(app):
                     fname, ctype = STATIC[path]
                     with open(os.path.join(WEB_DIR, fname), "rb") as f:
                         body = f.read()
+                    if fname == "index.html":
+                        wv = web_version()
+                        body = (body.replace(b'href="app.css"', f'href="app.css?v={wv["app.css"]}"'.encode(), 1)
+                                .replace(b'src="app.js"', f'src="app.js?v={wv["app.js"]}"'.encode(), 1)
+                                .replace(b"</head>", f'<meta name="web-version" content="{wv["v"]}">\n</head>'.encode(), 1))
                     if DEV and fname == "index.html":
                         body = body.replace(b"</body>", b'<script src="__dev/reload.js"></script></body>', 1)
                     return self.send(200, body, ctype)
