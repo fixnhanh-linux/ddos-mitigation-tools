@@ -513,32 +513,41 @@
         <div id="drawer-java-quick" class="hidden mt" style="padding:10px 12px;background:var(--panel-2);border-radius:8px;border:1px solid var(--line);align-items:center;gap:10px;"></div>
       </fieldset>
       <fieldset>
-        <legend>Bảo mật</legend>
-        <label class="switch"><input type="checkbox" name="auth"><span class="track"></span>
-          <span><b>Bắt xác thực cổng web</b><small>Người dùng phải có cookie đăng nhập portal hợp lệ.</small></span></label>
-        <label class="switch"><input type="checkbox" name="console_auth"><span class="track"></span>
-          <span><b>Bắt xác thực console</b><small>Tắt nếu BMC dùng trình xem Java / ứng dụng ngoài (không có cookie).</small></span></label>
-        <label class="mt">Target bắt buộc
-          <input name="expected_target" placeholder="để trống nếu không kiểm tra">
-          <small class="help">Token phải có trường <code>target</code> đúng giá trị này mới được vào BMC.</small></label>
+        <legend>Trạng thái</legend>
+        <label class="switch"><input type="checkbox" name="enabled"><span class="track"></span>
+          <span><b>Đang hoạt động</b><small>Tắt = gỡ BMC khỏi Traefik ở lần Áp dụng sau, vẫn giữ cấu hình.</small></span></label>
       </fieldset>
       <fieldset>
-        <legend>Nâng cao</legend>
-        <label class="switch"><input type="checkbox" name="legacy_tls"><span class="track"></span>
-          <span><b>BMC đời cũ</b><small>Cho phép TLS 1.0 và cipher RSA/CBC. BMC chỉ hỗ trợ DHE vẫn không kết nối được.</small></span></label>
-        <label class="switch"><input type="checkbox" name="jsesp_cache"><span class="track"></span>
-          <span><b>Cache file .jsesp</b><small>Cho BMC AMI MegaRAC / Supermicro.</small></span></label>
-        <label class="switch"><input type="checkbox" name="enabled"><span class="track"></span>
-          <span><b>Đang hoạt động</b><small>Tắt để gỡ BMC khỏi Traefik mà vẫn giữ cấu hình.</small></span></label>
-        <label class="mt">Host header gửi tới BMC
-          <select name="host_header">
-            <option value="client">Tên miền proxy (mặc định)</option>
-            <option value="upstream">Địa chỉ IP của BMC</option>
-          </select></label>
-        <label class="mt">Số kết nối tối đa tới BMC
-          <input name="max_conns" type="number" min="0" max="32" placeholder="0 = không giới hạn">
-          <small class="help">BMC yếu (QCT / AMI) để <b>4</b>: proxy xếp hàng request thay vì dồn vào làm treo / 502 web IPMI.
-            0 = không giới hạn.</small></label>
+        <legend>Bảo mật</legend>
+        <div class="switch-grid">
+          <label class="switch"><input type="checkbox" name="auth"><span class="track"></span>
+            <span><b>Đăng nhập portal - web</b><small>Chỉ người đã đăng nhập portal mới mở được trang BMC.</small></span></label>
+          <label class="switch"><input type="checkbox" name="console_auth"><span class="track"></span>
+            <span><b>Đăng nhập portal - console</b><small>Tắt khi console mở bằng Java / ứng dụng ngoài (không gửi cookie).</small></span></label>
+        </div>
+        <label class="mt">Giới hạn theo target của token
+          <input name="expected_target" placeholder="để trống = không giới hạn">
+          <small class="help">Chỉ token có trường <code>target</code> đúng giá trị này mới vào được BMC.</small></label>
+      </fieldset>
+      <fieldset>
+        <legend>Tương thích BMC</legend>
+        <div class="fields">
+          <label>Host header gửi tới BMC
+            <select name="host_header">
+              <option value="client">Tên miền proxy (đa số BMC)</option>
+              <option value="upstream">IP của BMC (iDRAC 9)</option>
+            </select>
+            <small class="help">Chọn IP nếu iDRAC 9 báo <code>QueryNotSupported</code>.</small></label>
+          <label>Số kết nối tối đa
+            <input name="max_conns" type="number" min="0" max="32" placeholder="0 = không giới hạn">
+            <small class="help">BMC yếu (QCT / AMI) để <b>4</b> để web IPMI khỏi treo / 502.</small></label>
+        </div>
+        <div class="switch-grid mt">
+          <label class="switch"><input type="checkbox" name="legacy_tls"><span class="track"></span>
+            <span><b>TLS cũ</b><small>BMC đời cũ: cho phép TLS 1.0, cipher RSA/CBC. BMC chỉ có DHE vẫn không vào được.</small></span></label>
+          <label class="switch"><input type="checkbox" name="jsesp_cache"><span class="track"></span>
+            <span><b>Cache file .jsesp</b><small>Cho BMC AMI MegaRAC / Supermicro.</small></span></label>
+        </div>
       </fieldset>
       <div id="drawer-links" class="drawer-links hidden"></div>
       <details id="preview-wrap" class="preview">

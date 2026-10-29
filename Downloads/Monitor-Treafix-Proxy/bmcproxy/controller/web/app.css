@@ -364,6 +364,8 @@ label { display: flex; flex-direction: column; gap: 5px; font-weight: 500; color
 .switch input:focus-visible + .track { box-shadow: 0 0 0 3px var(--accent-soft); }
 .switch b { display: block; font-weight: 600; }
 .switch small { display: block; color: var(--muted); font-weight: 400; font-size: 12.5px; }
+.switch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+@media (max-width: 560px) { .switch-grid { grid-template-columns: 1fr; } }
 .mt { margin-top: 8px; }
 
 /* ---------- drawer ---------- */
