@@ -434,6 +434,7 @@
 <!-- ============================== Ngăn sửa BMC ============================== -->
 <div id="drawer-backdrop" class="backdrop hidden"></div>
 <div id="menu-backdrop" class="backdrop menu-backdrop hidden"></div>
+<nav id="tabbar" class="tabbar" aria-label="Menu nhanh"></nav>
 <aside id="drawer" class="drawer" aria-hidden="true">
   <form id="bmc-form" class="drawer-inner" novalidate>
     <header class="drawer-head">
@@ -456,8 +457,10 @@
               <label>Loại máy<select name="template"><option value="">— Tự nhập (không dùng mẫu) —</option></select></label>
               <label>IP của BMC
                 <span class="input-row"><input name="tpl_ip" placeholder="vd 10.3.7.147" inputmode="decimal">
+                  <button type="button" class="btn small primary" id="btn-detect" title="Agent của site thử cổng web, đọc trang / Redfish của BMC để nhận loại máy">Dò</button>
                   <button type="button" class="btn small" id="btn-apply-tpl" title="Điền lại ô ② và các tuỳ chọn theo mẫu (ghi đè chỉnh tay)">Điền lại</button></span></label>
             </div>
+            <div id="detect-result" class="detect-result hidden"></div>
             <div id="tpl-summary" class="tpl-summary"></div>
           </div>
           <label class="span-2"><span><b>② Địa chỉ BMC</b> <span class="help">- địa chỉ proxy gọi tới (được lưu)</span></span>

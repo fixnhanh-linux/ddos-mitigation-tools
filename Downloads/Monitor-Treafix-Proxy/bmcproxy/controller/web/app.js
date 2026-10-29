@@ -145,6 +145,7 @@ async function showApp(me) {
   $$("[data-min-role]").forEach((a) => a.classList.toggle("hidden", RANK[me.role] < RANK[a.dataset.minRole]));
   $$("[data-admin-only]").forEach((a) => a.classList.toggle("hidden", !isAdmin()));
   $("#app").classList.toggle("customer-mode", me.role === "customer");
+  buildTabbar();
   if (me.role === "customer") {  // cong khach hang: chi "BMC cua toi" + Cai dat (mat khau, 2FA)
     $("#whorole").textContent = ROLE_LABEL.customer;
     initSidebar();
@@ -293,6 +294,7 @@ function route() {
   if (!isCustomer() && page === "my") page = "overview";
   state.page = page;
   $$(".side-nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
+  $$("#tabbar a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
   $$(".page").forEach((p) => p.classList.toggle("hidden", p.id !== "page-" + page));
   $("#page-title").textContent = PAGES[page].title;
   $("#page-sub").textContent = PAGES[page].sub;
@@ -314,6 +316,20 @@ function setMenu(open) {
   $("#menu-backdrop").classList.toggle("hidden", !open);
 }
 $("#btn-menu").addEventListener("click", () => setMenu(!$("#sidebar").classList.contains("open")));
+
+// Thanh icon duoi man hinh dien thoai: lay icon + ten tu menu ben trai (dung quyen dang nhap), them nut "Thêm" mo menu day du
+const TABBAR_PAGES = { staff: ["overview", "sites", "bmcs", "access"], customer: ["my", "settings"] };
+const TABBAR_SHORT = { overview: "Tổng quan", access: "Truy cập", my: "BMC" };
+function buildTabbar() {
+  const bar = $("#tabbar");
+  const pages = TABBAR_PAGES[isCustomer() ? "customer" : "staff"];
+  bar.innerHTML = pages.map((p) => $(`.side-nav a[data-page="${p}"]`)).filter((a) => a && !a.classList.contains("hidden"))
+    .map((a) => `<a href="#${a.dataset.page}" data-page="${a.dataset.page}">${a.querySelector(".ico").outerHTML}
+      <span>${esc(TABBAR_SHORT[a.dataset.page] || a.querySelector(".nav-lbl").textContent)}</span></a>`).join("")
+    + `<button type="button" data-tab-menu>${ICO_ACTIONS.bulk}<span>Thêm</span></button>`;
+  bar.querySelector("[data-tab-menu]").addEventListener("click", () => setMenu(true));
+  $$("a", bar).forEach((a) => a.classList.toggle("active", a.dataset.page === state.page));
+}
 $("#menu-backdrop").addEventListener("click", () => setMenu(false));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#sidebar").classList.contains("open")) setMenu(false); });
 
@@ -943,6 +959,7 @@ function openDrawer(b) {
   fillTemplateSelect(f.template);
   TEXT_FIELDS.forEach((k) => { if (d[k] != null) f[k].value = d[k]; });
   renderTplSummary();
+  $("#detect-result").className = "detect-result hidden";
   f.tpl_ip.value = ((d.upstream || "").match(/^https?:\/\/([^:/]+)/) || [])[1] || "";
   BOOL_FIELDS.forEach((k) => { f[k].checked = k === "jnlp_rewrite" ? d[k] !== false : !!d[k]; });
   f.tcp_ports.value = fmtTcp(d.tcp_ports);
@@ -1843,6 +1860,57 @@ async function applyTemplate(quiet) {
   } catch (err) { $("#bmc-form-error").textContent = err.message; }
 }
 $("#btn-apply-tpl").addEventListener("click", () => applyTemplate(false));
+
+// Do loai BMC: agent cua site (cung mang BMC) thu cong web + doc trang / Redfish -> chon mau, dien dia chi, goi y cong proxy
+async function detectBmc() {
+  const f = $("#bmc-form");
+  const box = $("#detect-result");
+  const ip = f.tpl_ip.value.trim();
+  const site = state.sites.find((x) => x.key === f.site.value);
+  const show = (cls, html) => { box.className = `detect-result ${cls}`; box.innerHTML = html; };
+  if (!ip) return show("bad", "Gõ IP của BMC trước.");
+  if (!site || !site.online) return show("bad", `Agent của site <b>${esc(site ? site.label : f.site.value)}</b> đang mất liên lạc - không dò được. Chọn loại máy bằng tay.`);
+  const btn = $("#btn-detect");
+  btn.disabled = true;
+  try {
+    show("wait", `Agent ${esc(site.hostname || site.key)} đang dò ${esc(ip)}…`);
+    const q = await api("POST", `sites/${site.key}/command`, { name: "detect", ip });
+    let r = null;
+    for (let i = 0; i < 30 && !r; i++) {
+      await new Promise((res) => setTimeout(res, 2000));
+      show("wait", `Agent ${esc(site.hostname || site.key)} đang dò ${esc(ip)}… ${2 * (i + 1)} giây`);
+      const x = await api("GET", `sites/${site.key}/detect`);
+      if (x && x.req === q.req) r = x;
+    }
+    if (!r) throw new Error("Agent chưa trả kết quả sau 60 giây");
+    if (r.error) return show("bad", esc(r.error));
+    const w = r.web;
+    const t = r.template && state.templates[r.template];
+    const upstream = `${w.scheme}://${ip}${(w.scheme === "https" ? w.port === 443 : w.port === 80) ? "" : ":" + w.port}`;
+    if (t) {
+      f.template.value = r.template;
+      renderTplSummary();
+      if (!f.port.value) {
+        const p = await api("GET", `sites/${f.site.value}/free-ports`).catch(() => ({}));
+        if (p.port) f.port.value = p.port;
+        if (p.console_port && t.console !== "none") f.console_port.value = p.console_port;
+      }
+      await applyTemplate(true);
+    }
+    f.upstream.value = upstream;  // cong that cua BMC (mau "cung cong proxy" co the sai)
+    if (w.legacy_tls) f.legacy_tls.checked = true;
+    const extra = (r.open_ports || []).filter((p) => p !== w.port);
+    show(t ? "ok" : "warn", `<b>${t ? esc(t.label) : "Chưa nhận ra loại máy"}</b>
+      ${t ? `<span class="tag ${r.confidence === "cao" ? "ok" : "warn"}">độ tin cậy ${esc(r.confidence)}</span>` : ""}
+      <div class="kv-line">Web BMC <code>${esc(upstream)}</code>${w.tls ? ` · ${esc(w.tls)}` : ""}${w.ms != null ? ` · ${w.ms} ms` : ""}</div>
+      ${r.title || r.server ? `<div class="kv-line">Trang: ${esc(r.title || "")}${r.server ? ` · server ${esc(r.server)}` : ""}</div>` : ""}
+      ${(r.evidence || []).length ? `<div class="kv-line">Dựa vào: ${esc(r.evidence.join(", "))}</div>` : ""}
+      ${extra.length ? `<div class="kv-line">Cổng khác đang mở: ${extra.join(", ")}</div>` : ""}
+      ${t ? `<div class="kv-line">Đã điền: cổng proxy <b>${esc(f.port.value || "?")}</b> → ${esc(upstream)}</div>`
+        : '<div class="kv-line">Chọn loại máy bằng tay; Địa chỉ BMC đã điền theo cổng web tìm thấy.</div>'}`);
+  } catch (err) { show("bad", esc(err.message)); } finally { btn.disabled = false; }
+}
+$("#btn-detect").addEventListener("click", detectBmc);
 // Doi loai may / go xong IP -> tu dien; khong co mau -> chi thay IP trong Dia chi BMC
 $("#bmc-form").template.addEventListener("change", () => { renderTplSummary(); applyTemplate(true); });
 $("#bmc-form").tpl_ip.addEventListener("change", () => {
