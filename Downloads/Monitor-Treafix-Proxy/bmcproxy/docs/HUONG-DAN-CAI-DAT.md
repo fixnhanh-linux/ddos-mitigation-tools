@@ -30,6 +30,8 @@ Mọi lệnh chạy trên **Ubuntu 22.04**, bằng tài khoản có `sudo`.
 16. [Giới hạn số kết nối tới BMC (QCT / AMI hay treo)](#16-giới-hạn-số-kết-nối-tới-bmc-qct--ami-hay-treo)
 17. [Tải file .jnlp: tự sửa đúng link proxy](#17-tải-file-jnlp-tự-sửa-đúng-link-proxy)
 18. [Kiểm tra toàn bộ BMC và lỗi thường gặp](#18-kiểm-tra-toàn-bộ-bmc-và-lỗi-thường-gặp)
+19. … 32. Các mục MySQL, người dùng, AD/LDAP, cảnh báo, cổng khách hàng, bảo trì, reverse proxy, cổng bận
+33. [Thêm BMC nhanh: dò loại máy, Host header iDRAC 9, điện thoại](#33-thêm-bmc-nhanh-dò-loại-máy-host-header-idrac-9-điện-thoại)
 
 Bản Word đầy đủ (có hình thức in): `Huong-Dan-BMC-Gateway.docx`.
 
@@ -634,8 +636,12 @@ Tick ô đầu dòng (hoặc ô tiêu đề để chọn tất cả BMC đang l�
 - bật xác thực;
 - tắt xác thực web / console;
 - tạm tắt / bật lại;
-- đổi mẫu;
+- đổi mẫu (lấy luôn TLS cũ / .jsesp / console Java trên web / số kết nối / **Host header** theo mẫu);
+- **Host = IP BMC** / **Host = tên miền**: đổi Host header gửi tới BMC (iDRAC 9 cần Host = IP, xem 33.2);
+- nhãn, hạn sử dụng;
 - xoá.
+
+Đổi xong bấm **Xem & áp dụng** để đẩy xuống server.
 
 ---
 
@@ -1182,3 +1188,74 @@ Traefik **dừng hẳn** nếu không mở được một cổng. Vì vậy trư
 - BMC bị bỏ qua mà trước đó chạy bằng nginx: agent **giữ lại file nginx** của nó, BMC vẫn vào được như cũ.
 - Xử lý: tắt chương trình đang giữ cổng (vd `sudo ss -ltnp | grep :5901` → `systemctl stop …`), hoặc đổi cổng của BMC trên web, rồi bấm **Thử lại** trên thẻ site.
 - `"skip_busy_ports": false`: huỷ cả lần áp dụng như bản cũ (khôi phục cấu hình cũ, không restart Traefik).
+
+---
+
+## 33. Thêm BMC nhanh: dò loại máy, Host header iDRAC 9, điện thoại
+
+### 33.1. Nút Dò (tự nhận loại máy từ IP)
+
+BMC → **+ Thêm BMC** → chọn **Site** → ô **IP của BMC** gõ IP → bấm **Dò**.
+
+- Web gửi lệnh cho **agent của site** (agent ở cùng mạng BMC). Agent thử cổng web `443` / `8443` / `80`
+  (TLS thường, không được thì TLS cũ), đọc trang chủ, `/redfish/v1/` và tên tổ chức trong chứng chỉ, thử thêm cổng
+  console / Java (5900, 7578, 5120, 17990, 623…).
+- Kết quả hiện ngay trong form: loại máy, độ tin cậy, tiêu đề trang, dấu hiệu nhận ra, cổng đang mở.
+- Form tự điền: **Loại máy**, **Cổng trên proxy** (cổng trống của site nếu đang để trống), **② Địa chỉ BMC** theo cổng
+  web thật tìm thấy, **TLS cũ** nếu BMC cần. Kiểm tra lại rồi **Lưu** → **Xem & áp dụng**.
+
+| Dấu hiệu | Mẫu |
+|---|---|
+| Dell + có `/restgui` | `idrac9` (Host = IP BMC) |
+| Dell, chỉ bắt tay được TLS cũ / thấy "iDRAC6" | `idrac6` |
+| Dell còn lại | `idrac7-8` |
+| iLO / Integrated Lights-Out / Hewlett | `ilo4-5` |
+| XClarity / Lenovo / IMM | `lenovo` |
+| Cisco Integrated Management Controller / CIMC | `cisco-c220` |
+| Supermicro / `/cgi/login.cgi` | `supermicro` |
+| MegaRAC / American Megatrends / Quanta / QCT | `qct-ami-java` |
+
+- Không nhận ra loại máy: vẫn điền Địa chỉ BMC, chọn loại máy bằng tay.
+- Site mất liên lạc: không dò được, form báo rõ.
+- Cần **agent bản mới** (Site → **Cập nhật agent**, mục 28.4); agent cũ không trả kết quả, form báo hết 60 giây.
+
+### 33.2. iDRAC 9 báo `QueryNotSupported`
+
+Truy cập qua proxy, sau khi đăng nhập trang `restgui/index.html?…` trả JSON `Base.1.8.GeneralError` /
+`QueryNotSupported`. Vào thẳng IP iDRAC thì bình thường.
+
+Nguyên nhân: iDRAC 9 bật **Host Header Check**: chỉ nhận request có Host = IP / tên của chính nó, mà proxy đang gửi
+Host = tên miền proxy.
+
+Sửa (chọn 1):
+
+1. Trên web: BMC → **Tương thích BMC** → **Host header = IP của BMC (iDRAC 9)** → Lưu → **Áp dụng**.
+   Nhiều máy: tick chọn → **Host = IP BMC** (mục 12.3). Mẫu `idrac9`, `dell-r640`, `dell-c6420` và nút **Dò**
+   đã đặt sẵn cho BMC tạo mới.
+2. Trên từng iDRAC (chắc chắn nhất): SSH vào iDRAC và chạy
+
+   ```bash
+   racadm set iDRAC.WebServer.HostHeaderCheck Disabled
+   ```
+
+   hoặc trên web iDRAC: **iDRAC Settings → Services → Web Server → Host Header Check = Disabled**.
+   Reset iDRAC về mặc định thì phải làm lại; cách 1 không bị ảnh hưởng.
+
+### 33.3. `Bad Request … ErrorDocument` (400)
+
+Trình duyệt giữ cookie **theo tên miền, không theo cổng**: mọi BMC của một site dùng chung tên miền proxy (chỉ khác cổng)
+nên cookie phiên của mọi BMC đã mở dồn chung. Quá khoảng 8 KB thì web server iDRAC trả `400 Bad Request`.
+
+- Thử cửa sổ ẩn danh (Ctrl+Shift+N): vào được là đúng lỗi này.
+- Xoá cookie của tên miền proxy: `chrome://settings/content/all` → tìm `proxybb-…longvan.net` → xoá.
+
+### 33.4. Dùng trên điện thoại
+
+Màn hình ≤ 640px: thanh icon dưới màn hình (**Tổng quan · Site · BMC · Truy cập · Thêm**; **Thêm** mở menu đầy đủ),
+thẻ BMC gọn (cổng + xác thực, ghi chú + site, link, địa chỉ BMC), chip lọc 1 hàng vuốt ngang.
+Tài khoản khách hàng chỉ thấy **BMC** và **Cài đặt**.
+
+### 33.5. Sau khi cập nhật web
+
+Trình duyệt có thể còn giữ giao diện cũ: bấm **Ctrl+F5** một lần.
+

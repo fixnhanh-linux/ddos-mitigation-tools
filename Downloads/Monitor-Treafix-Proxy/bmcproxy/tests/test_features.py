@@ -22,6 +22,12 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for d in ("agent", "controller", "common"):
     sys.path.insert(0, os.path.join(ROOT, d))
+# Windows: console cp1252 khong in duoc tieng Viet -> serve() chet ngay luc in dong khoi dong
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 
 def free_port():
@@ -414,6 +420,115 @@ class SiteTest(unittest.TestCase):
                                                                                 "X-Agent-Site": "hcm"})[0], 401)
         finally:
             shutil.rmtree(inst, ignore_errors=True)
+
+
+    def test_idrac9_host_header_and_batch(self):
+        # mau co san luon lay tu code, ban sao cu trong templates.json khong de len
+        self.st.templates["idrac9"] = {"label": "Dell iDRAC 9", "upstream": "default", "console": "none",
+                                       "legacy_tls": False, "jsesp_cache": False}
+        s, _, t = req(self.port, "GET", "/api/templates", None, self.ck)
+        self.assertEqual(s, 200)
+        self.assertEqual(t["idrac9"]["host_header"], "upstream")
+        self.assertTrue(t["idrac9"]["builtin"])
+        s, _, f = req(self.port, "POST", "/api/templates/idrac9/apply", {"port": 8024, "ip": "10.0.0.24"}, self.ck)
+        self.assertEqual((s, f["host_header"], f["upstream"]), (200, "upstream", "https://10.0.0.24"))
+        # sua hang loat: Host = IP BMC roi tra lai
+        key = [{"site": "hcm", "port": 8001}]
+        for want in ("upstream", "client"):
+            s, _, r = req(self.port, "POST", "/api/bmcs/batch",
+                          {"keys": key, "action": "set", "fields": {"host_header": want}}, self.ck)
+            self.assertEqual((s, r.get("changed")), (200, 1), r)
+            b = next(x for x in self.st.bmcs if x["site"] == "hcm" and x["port"] == 8001)
+            self.assertEqual(b["host_header"], want)
+        s, _, r = req(self.port, "POST", "/api/bmcs/batch",
+                      {"keys": key, "action": "set", "fields": {"host_header": "sai"}}, self.ck)
+        self.assertEqual(s, 400, r)
+
+    def test_detect_command_roundtrip(self):
+        s, _, r = req(self.port, "POST", "/api/sites/hcm/command", {"name": "detect", "ip": "10.0.0.9;rm"}, self.ck)
+        self.assertEqual(s, 400, r)
+        s, _, q = req(self.port, "POST", "/api/sites/hcm/command", {"name": "detect", "ip": "10.0.0.9"}, self.ck)
+        self.assertEqual(s, 200, q)
+        self.assertTrue(q["req"])
+        s, _, resp = self.sync()
+        cmd = next(c for c in resp["commands"] if c.get("name") == "detect")
+        self.assertEqual((cmd["ip"], cmd["req"]), ("10.0.0.9", q["req"]))
+        # agent gui ket qua o lan sync sau -> web tra cho form
+        self.sync({"detect": {"req": q["req"], "ip": "10.0.0.9", "template": "idrac9", "confidence": "cao",
+                              "web": {"port": 443, "scheme": "https", "tls": "TLSv1.3", "legacy_tls": False}}})
+        s, _, d = req(self.port, "GET", "/api/sites/hcm/detect", None, self.ck)
+        self.assertEqual((s, d["req"], d["template"]), (200, q["req"], "idrac9"))
+
+    def test_dev_routes_off(self):
+        import gw_controller
+        self.assertFalse(gw_controller.DEV)
+        self.assertEqual(req(self.port, "GET", "/__dev/version", None, self.ck)[0], 404)
+        s, _, body = req(self.port, "GET", "/", None, self.ck)
+        self.assertNotIn(b"__dev/reload.js", body)
+
+
+# ====================================================================== do loai BMC
+class DetectTest(unittest.TestCase):
+    """detect_bmc voi trang BMC gia lap (HTTP cong ngau nhien)."""
+
+    FAKES = {
+        "idrac9": {"/": (302, {"Location": "/restgui/start.html"}, ""),
+                   "/restgui/start.html": (200, {}, "<title>iDRAC9</title>"),
+                   "/redfish/v1/": (200, {}, json.dumps({"Product": "Integrated Dell Remote Access Controller"}))},
+        "idrac7-8": {"/": (200, {}, "<title>iDRAC8 - Login</title>")},
+        "ilo4-5": {"/": (200, {}, "<title>iLO 5</title> Integrated Lights-Out")},
+        "lenovo": {"/": (200, {}, "<title>Lenovo XClarity Controller</title>")},
+        "cisco-c220": {"/": (200, {}, "<title>Cisco Integrated Management Controller</title>")},
+        "supermicro": {"/": (200, {}, '<form action="/cgi/login.cgi">')},
+        "qct-ami-java": {"/": (200, {"Server": "lighttpd"}, "<title>MegaRAC SP</title>")},
+        None: {"/": (200, {}, "<title>Router</title>")},
+    }
+
+    def test_fingerprints(self):
+        import gw_errpage
+        old = gw_errpage.DETECT_WEB_PORTS, gw_errpage.DETECT_EXTRA_PORTS
+        try:
+            for expect, pages in self.FAKES.items():
+                class H(http.server.BaseHTTPRequestHandler):
+                    def do_GET(self, pages=pages):
+                        code, hdr, body = pages.get(self.path, (404, {}, "nf"))
+                        self.send_response(code)
+                        for k, v in hdr.items():
+                            self.send_header(k, v)
+                        self.end_headers()
+                        self.wfile.write(body.encode())
+
+                    def log_message(self, *a):
+                        pass
+
+                srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+                threading.Thread(target=srv.serve_forever, daemon=True).start()
+                try:
+                    gw_errpage.DETECT_WEB_PORTS = [(srv.server_address[1], "http")]
+                    gw_errpage.DETECT_EXTRA_PORTS = []
+                    r = gw_errpage.detect_bmc("127.0.0.1")
+                finally:
+                    srv.shutdown()
+                    srv.server_close()
+                self.assertEqual(r.get("template"), expect, r)
+                self.assertEqual(r["web"]["port"], srv.server_address[1])
+        finally:
+            gw_errpage.DETECT_WEB_PORTS, gw_errpage.DETECT_EXTRA_PORTS = old
+
+    def test_no_web_port(self):
+        import gw_errpage
+        old = gw_errpage.DETECT_WEB_PORTS, gw_errpage.DETECT_EXTRA_PORTS
+        try:
+            s = socket.socket()
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+            s.close()  # cong vua dong -> chac chan khong co ai nghe
+            gw_errpage.DETECT_WEB_PORTS, gw_errpage.DETECT_EXTRA_PORTS = [(port, "https")], []
+            r = gw_errpage.detect_bmc("127.0.0.1")
+            self.assertIn("error", r)
+            self.assertIsNone(r.get("template"))
+        finally:
+            gw_errpage.DETECT_WEB_PORTS, gw_errpage.DETECT_EXTRA_PORTS = old
 
 
 if __name__ == "__main__":

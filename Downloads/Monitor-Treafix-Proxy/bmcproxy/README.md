@@ -31,7 +31,9 @@ Cổng truy cập BMC / IPMI (iDRAC, iLO, AMI, Supermicro…) cho **nhiều site
 |---|---|
 | Site | Thêm / sửa / xoá site. Token agent riêng từng site (đổi được). Giới hạn IP agent. Ghi đè URL auth-token, chứng chỉ, log theo site. Trạng thái online, phiên bản Traefik, router lỗi, kết quả áp dụng gần nhất |
 | BMC | Thêm / sửa / xoá / tạm tắt. Lọc theo site và trạng thái. Nhập từ nginx của từng server. Xem trước config Traefik. Cùng một cổng dùng được ở các site khác nhau |
-| Mẫu & hàng loạt | 11 mẫu BMC có sẵn theo loại máy (iDRAC 6/7/8/9, Dell C6420/R620/R640, iLO 4/5, Lenovo, Cisco C220, Quanta, Supermicro) + mẫu riêng, dùng chung mọi site. Gợi ý cổng trống. Thêm / cập nhật hàng loạt nhiều site bằng cách dán từ Excel/CSV. Chọn nhiều BMC để bật/tắt xác thực, tạm tắt, đổi mẫu, xoá. Xuất CSV |
+| Mẫu & hàng loạt | 11 mẫu BMC có sẵn theo loại máy (iDRAC 6/7/8/9, Dell C6420/R620/R640, iLO 4/5, Lenovo, Cisco C220, Quanta, Supermicro) + mẫu riêng, dùng chung mọi site. Gợi ý cổng trống. Thêm / cập nhật hàng loạt nhiều site bằng cách dán từ Excel/CSV. Chọn nhiều BMC để bật/tắt xác thực, tạm tắt, đổi mẫu, đổi Host header, xoá. Xuất CSV |
+| Thêm BMC nhanh | Nút **Dò**: gõ IP, agent của site nhận loại máy (cổng web, TLS cũ, trang chủ, Redfish, chứng chỉ) rồi tự chọn mẫu, cổng proxy trống, địa chỉ BMC. iDRAC 9 tự đặt Host = IP BMC (hết `QueryNotSupported`) |
+| Điện thoại | Thanh icon dưới màn hình, thẻ BMC gọn, chip lọc vuốt ngang |
 | Console Java | Chuyển tiếp TCP thô (cổng proxy → cổng BMC) cho console Java, giới hạn IP; agent tự sửa file `.jnlp` (IP nội bộ → tên miền proxy, cổng BMC → cổng proxy); file `.jar` tải không cần cookie. Có sẵn cổng Java cho QCT/AMI, iDRAC 6/7/8, iLO 4, Supermicro |
 | Áp dụng | Diff từng file theo site. Chọn site để áp dụng. Theo dõi tiến độ trực tiếp. Thử lại khi lỗi. Kiểm tra cổng trống trước khi restart. Tự rollback |
 | Bảo mật | Xác thực bật sẵn cho web + console. Target bắt buộc theo BMC. Chặn giả mạo header `Token-*`. TLS ≥ 1.2. Mật khẩu PBKDF2, khoá khi sai 5 lần, chống CSRF, CSP |
@@ -214,7 +216,9 @@ bmcproxy/
 
 ```bash
 python bmcproxy.py adduser admin -c config.json      # tạo tài khoản (máy dev)
-python bmcproxy.py serve -c config.json              # chạy web dev
+python bmcproxy.py serve -c config.json              # chạy web
+python bmcproxy.py dev -c config.json                # chạy web dev: sửa file web -> trình duyệt tự cập nhật (CSS đổi ngay),
+                                                     #   sửa .py -> server tự khởi động lại
 python -m unittest discover -s tests -v              # kiểm tra trước khi đóng gói
 python tools/build_packages.py                       # tạo dist/bmc-gateway-web-*.zip, dist/bmc-gateway-agent-*.zip
 ```

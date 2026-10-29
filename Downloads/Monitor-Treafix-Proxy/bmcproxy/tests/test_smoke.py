@@ -18,6 +18,12 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for d in ("agent", "controller", "common"):
     sys.path.insert(0, os.path.join(ROOT, d))
+# Windows: console cp1252 khong in duoc tieng Viet -> serve() chet ngay luc in dong khoi dong
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 MODULES = ["gw_common", "gw_render", "gw_auth", "gw_controller", "gw_db", "gw_ldap", "gw_templates",
            "gw_agent", "gw_nginx", "gw_limit", "gw_errpage", "gw_java", "gw_kvm"]
