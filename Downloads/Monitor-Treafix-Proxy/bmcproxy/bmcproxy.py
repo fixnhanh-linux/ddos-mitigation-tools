@@ -32,6 +32,48 @@ for _d in ("agent", "controller", "common"):
 from gw_common import RE_USER, ROLES, hash_password  # noqa: E402
 
 
+def run_dev(config):
+    """Chay 'serve' o tien trinh con voi BMCPROXY_DEV=1; file .py doi -> khoi dong lai tien trinh con."""
+    import subprocess
+    import time
+
+    def snapshot():
+        out = {}
+        for root, dirs, files in os.walk(APP_DIR):
+            dirs[:] = [x for x in dirs if x not in ("data", "backups", "dist", "tests", "__pycache__", ".git")]
+            for f in files:
+                if f.endswith(".py"):
+                    p = os.path.join(root, f)
+                    try:
+                        out[p] = os.stat(p).st_mtime_ns
+                    except OSError:
+                        pass
+        return out
+
+    env = {**os.environ, "BMCPROXY_DEV": "1", "PYTHONUNBUFFERED": "1"}
+    cmd = [sys.executable, os.path.abspath(__file__), "serve", "-c", config]
+    while True:
+        seen = snapshot()
+        child = subprocess.Popen(cmd, env=env)
+        try:
+            while child.poll() is None and snapshot() == seen:
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            child.terminate()
+            return
+        if child.poll() is None:
+            print("DEV: code .py thay đổi -> khởi động lại server", flush=True)
+            child.terminate()
+            try:
+                child.wait(5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+        else:
+            print(f"DEV: server dừng (mã {child.returncode}), sửa lỗi rồi lưu file để chạy lại", flush=True)
+            while snapshot() == seen:
+                time.sleep(0.5)
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -51,11 +93,17 @@ def main():
     u.add_argument("--unlock", action="store_true", help="mở khoá + bỏ ngày hết hạn")
     u.add_argument("-c", "--config", default=os.path.join(APP_DIR, "config.json"))
 
+    d = sub.add_parser("dev", help="chạy web để phát triển: sửa code là trình duyệt / server tự cập nhật")
+    d.add_argument("-c", "--config", default=os.path.join(APP_DIR, "config.json"))
+
     a = sub.add_parser("agent", help="chạy agent trên server Traefik")
     a.add_argument("-c", "--config", default=os.path.join(APP_DIR, "agent.json"))
     a.add_argument("--once", action="store_true", help="đồng bộ 1 lần rồi thoát")
 
     args = ap.parse_args()
+
+    if args.cmd == "dev":
+        return run_dev(args.config)
 
     if args.cmd == "agent":
         from gw_agent import Agent, load_agent_config

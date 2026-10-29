@@ -119,6 +119,37 @@ STATIC = {
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
 }
+# Che do dev (python3 bmcproxy.py dev): trinh duyet tu tai lai khi sua file web, server tu khoi dong lai khi sua .py
+DEV = os.environ.get("BMCPROXY_DEV") == "1"
+DEV_BOOT = str(time.time())
+DEV_RELOAD_JS = b"""(function () {
+  var last = null;
+  function tick() {
+    fetch("__dev/version", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (v) {
+      if (last && v.boot !== last.boot) return location.reload();
+      if (last && v.css !== last.css) {
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(function (l) {
+          l.href = l.href.replace(/[?].*$/, "") + "?v=" + v.css;
+        });
+      }
+      if (last && v.page !== last.page) return location.reload();
+      last = v;
+    }).catch(function () {}).then(function () { setTimeout(tick, 700); });
+  }
+  tick();
+})();
+"""
+
+
+def dev_version():
+    def mt(name):
+        try:
+            return str(os.stat(os.path.join(WEB_DIR, name)).st_mtime_ns)
+        except OSError:
+            return ""
+    return {"boot": DEV_BOOT, "css": mt("app.css"), "page": mt("index.html") + "-" + mt("app.js")}
+
+
 BMC_META = ("imported_from", "imported_auth", "imported_console_auth", "template", "updated_at", "updated_by",
             "tags", "expires")
 
@@ -1356,7 +1387,14 @@ def make_handler(app):
                 if method == "GET" and path in STATIC:
                     fname, ctype = STATIC[path]
                     with open(os.path.join(WEB_DIR, fname), "rb") as f:
-                        return self.send(200, f.read(), ctype)
+                        body = f.read()
+                    if DEV and fname == "index.html":
+                        body = body.replace(b"</body>", b'<script src="__dev/reload.js"></script></body>', 1)
+                    return self.send(200, body, ctype)
+                if DEV and method == "GET" and path == "/__dev/version":
+                    return self.send(200, dev_version())
+                if DEV and method == "GET" and path == "/__dev/reload.js":
+                    return self.send(200, DEV_RELOAD_JS, "application/javascript; charset=utf-8")
                 if path.startswith("/agent/v1/"):
                     return self.agent_api(method, path[len("/agent/v1/"):])
                 m = re.match(r"^/install/([A-Za-z0-9_-]{20,64})(/agent\.zip)?$", path)
@@ -2711,6 +2749,8 @@ def serve(store):
         ctx.load_cert_chain(cfg["tls_cert"], cfg["tls_key"])
         httpd.ssl_ctx = ctx  # bat tay TLS lam trong Handler.setup (moi ket noi 1 luong)
         scheme = "https"
+    if DEV:
+        print("DEV: sửa file web -> trình duyệt tự tải lại; sửa .py -> server tự khởi động lại", flush=True)
     print(f"bmcproxy controller {VERSION}: {scheme}://{cfg['listen_host']}:{cfg['listen_port']}/"
           + (f" | dữ liệu: {store.db.describe()}" if store.db else " | dữ liệu: file JSON"), flush=True)
     httpd.serve_forever()
