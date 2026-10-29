@@ -451,16 +451,16 @@
             <span class="input-row"><input name="port" type="number" min="1" max="65535" required>
               <button type="button" class="btn small" id="btn-free-port" title="Gợi ý cổng còn trống của site">Gợi ý</button></span></label>
           <div class="span-2 tpl-box">
-            <div class="tpl-head"><b>① Điền nhanh theo loại máy</b> <span class="help">(không bắt buộc)</span></div>
+            <div class="tpl-head"><b>① Loại máy + IP</b> <span class="help">không bắt buộc - tự điền ô ② và các tuỳ chọn bên dưới</span></div>
             <div class="fields">
-              <label>Loại máy (mẫu)<select name="template"><option value="">— không dùng mẫu —</option></select></label>
-              <label>IP của BMC<input name="tpl_ip" placeholder="10.3.7.147" inputmode="decimal"></label>
+              <label>Loại máy<select name="template"><option value="">— Tự nhập (không dùng mẫu) —</option></select></label>
+              <label>IP của BMC
+                <span class="input-row"><input name="tpl_ip" placeholder="vd 10.3.7.147" inputmode="decimal">
+                  <button type="button" class="btn small" id="btn-apply-tpl" title="Điền lại ô ② và các tuỳ chọn theo mẫu (ghi đè chỉnh tay)">Điền lại</button></span></label>
             </div>
-            <span class="help">Chọn loại máy + gõ IP → <b>tự điền ô ② Địa chỉ BMC</b> và các tuỳ chọn (console, TLS cũ, .jsesp…) theo loại máy.
-              Ô IP này chỉ để điền nhanh, không được lưu riêng.</span>
-            <button type="button" class="btn small" id="btn-apply-tpl" title="Điền lại theo mẫu (ghi đè các tuỳ chọn)">Điền lại</button>
+            <div id="tpl-summary" class="tpl-summary"></div>
           </div>
-          <label class="span-2"><span><b>② Địa chỉ BMC</b> <span class="help">- proxy chuyển truy cập tới địa chỉ này (được lưu)</span></span>
+          <label class="span-2"><span><b>② Địa chỉ BMC</b> <span class="help">- địa chỉ proxy gọi tới (được lưu)</span></span>
             <input name="upstream" placeholder="https://10.3.7.147:8005" required></label>
           <label class="span-2">Ghi chú<input name="note" maxlength="200" placeholder="mã khách hàng, loại máy…"></label>
           <label>Nhãn (cách nhau bởi dấu phẩy)<input name="tags" maxlength="300" placeholder="vd KH-ABC, tủ A3, R640" list="tag-list"></label>

@@ -942,6 +942,7 @@ function openDrawer(b) {
   const d = b || { auth: true, console_auth: true, enabled: true, jnlp_rewrite: true, host_header: "client", site: $("#filter-site").value || (choices[0] || {}).key };
   fillTemplateSelect(f.template);
   TEXT_FIELDS.forEach((k) => { if (d[k] != null) f[k].value = d[k]; });
+  renderTplSummary();
   f.tpl_ip.value = ((d.upstream || "").match(/^https?:\/\/([^:/]+)/) || [])[1] || "";
   BOOL_FIELDS.forEach((k) => { f[k].checked = k === "jnlp_rewrite" ? d[k] !== false : !!d[k]; });
   f.tcp_ports.value = fmtTcp(d.tcp_ports);
@@ -1779,11 +1780,44 @@ function tplText(v, kind) {
   return v === "none" ? "không có" : v === "same" ? "https://IP:<cổng console>" : `https://IP:${v} (cố định)`;
 }
 
+// Nhom mau theo hang trong o chon loai may
+const TPL_GROUPS = [["Dell", /^(idrac|dell)/], ["HPE", /^ilo/], ["Lenovo", /^lenovo/], ["Cisco", /^cisco/],
+  ["QCT / Quanta / AMI", /^(qct|quanta)/], ["Supermicro", /^supermicro/]];
+
 function fillTemplateSelect(sel) {
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— không dùng mẫu —</option>' +
-    Object.entries(state.templates).map(([k, t]) => `<option value="${esc(k)}">${esc(t.label)}${t.builtin ? "" : " (riêng)"}</option>`).join("");
+  const groups = new Map(TPL_GROUPS.map(([g]) => [g, []]));
+  Object.entries(state.templates).forEach(([k, t]) => {
+    const g = t.builtin ? (TPL_GROUPS.find(([, re]) => re.test(k)) || ["Khác"])[0] : "Mẫu riêng";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(`<option value="${esc(k)}">${esc(t.label)}</option>`);
+  });
+  sel.innerHTML = '<option value="">— Tự nhập (không dùng mẫu) —</option>' +
+    [...groups].filter(([, o]) => o.length).map(([g, o]) => `<optgroup label="${esc(g)}">${o.join("")}</optgroup>`).join("");
   sel.value = cur;
+  renderTplSummary();
+}
+
+// Tom tat mau se dien gi: dia chi, console, cac tuy chon dac biet
+function renderTplSummary() {
+  const f = $("#bmc-form");
+  const box = $("#tpl-summary");
+  const t = state.templates[f.template.value];
+  if (!t) {
+    box.innerHTML = '<span class="help">Chọn loại máy rồi gõ IP: ô ② Địa chỉ BMC và console, TLS cũ, Host header… được điền sẵn theo máy.</span>';
+    return;
+  }
+  const opts = [
+    t.host_header === "upstream" && "Host = IP BMC",
+    t.legacy_tls && "TLS cũ",
+    t.jsesp_cache && "cache .jsesp",
+    t.java_web && "console Java trên web",
+    t.max_conns && `tối đa ${t.max_conns} kết nối`,
+    (t.java_ports || []).length && `cổng Java ${t.java_ports.join(", ")}`,
+  ].filter(Boolean);
+  box.innerHTML = `<div><span class="k">Web</span><code>${esc(tplText(t.upstream, "upstream"))}</code></div>
+    <div><span class="k">Console</span><code>${esc(tplText(t.console, "console"))}</code></div>
+    <div><span class="k">Tuỳ chọn</span>${opts.length ? opts.map((o) => `<span class="tag">${esc(o)}</span>`).join(" ") : '<span class="help">mặc định</span>'}</div>`;
 }
 
 async function applyTemplate(quiet) {
@@ -1791,6 +1825,7 @@ async function applyTemplate(quiet) {
   const key = f.template.value;
   if (!key) { if (!quiet) toast("Chọn loại máy trước", true); return; }
   if (!f.tpl_ip.value.trim()) { if (!quiet) toast("Gõ IP của BMC trước", true); return; }
+  if (!f.port.value) { $("#bmc-form-error").textContent = "Nhập Cổng trên proxy (hoặc bấm Gợi ý) để điền theo mẫu"; return; }
   try {
     const r = await api("POST", `templates/${encodeURIComponent(key)}/apply`,
       { port: f.port.value, ip: f.tpl_ip.value, console_port: f.console_port.value || null });
@@ -1809,7 +1844,7 @@ async function applyTemplate(quiet) {
 }
 $("#btn-apply-tpl").addEventListener("click", () => applyTemplate(false));
 // Doi loai may / go xong IP -> tu dien; khong co mau -> chi thay IP trong Dia chi BMC
-$("#bmc-form").template.addEventListener("change", () => applyTemplate(true));
+$("#bmc-form").template.addEventListener("change", () => { renderTplSummary(); applyTemplate(true); });
 $("#bmc-form").tpl_ip.addEventListener("change", () => {
   const f = $("#bmc-form");
   const ip = f.tpl_ip.value.trim();
@@ -1817,6 +1852,11 @@ $("#bmc-form").tpl_ip.addEventListener("change", () => {
   if (f.template.value) return applyTemplate(true);
   const m = f.upstream.value.match(/^(https?:\/\/)([^:/]+)(.*)$/);
   f.upstream.value = m ? m[1] + ip + m[3] : `https://${ip}`;
+});
+// Nhap cong sau khi da chon mau + IP -> dien theo mau
+$("#bmc-form").port.addEventListener("change", () => {
+  const f = $("#bmc-form");
+  if (f.template.value && f.tpl_ip.value.trim()) applyTemplate(true);
 });
 // Sua tay Dia chi BMC -> o IP dong bo theo (2 o khong bao gio lech nhau)
 $("#bmc-form").upstream.addEventListener("input", () => {
@@ -1832,6 +1872,7 @@ $("#btn-free-port").addEventListener("click", async () => {
     if (r.port) f.port.value = r.port;
     const tpl = state.templates[f.template.value];
     if (r.console_port && (!tpl || tpl.console !== "none")) f.console_port.value = r.console_port;
+    if (tpl && f.tpl_ip.value.trim()) await applyTemplate(true);
     toast(`Cổng trống: ${r.port}${r.console_port ? `, console ${r.console_port}` : ""}`);
   } catch (err) { toast(err.message, true); }
 });

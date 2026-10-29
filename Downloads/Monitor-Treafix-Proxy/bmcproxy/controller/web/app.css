@@ -565,7 +565,10 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
 .tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .label-tag { cursor: pointer; background: var(--info-soft); color: var(--info); border-color: transparent; }
 .tpl-head { margin-bottom: 8px; font-size: 13px; }
-.tpl-box #btn-apply-tpl { margin-top: 8px; }
+.tpl-summary { display: grid; gap: 4px; font-size: 12.5px; }
+.tpl-summary > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tpl-summary .k { min-width: 64px; color: var(--text-2); }
+.tpl-summary code { font-size: 12px; }
 
 /* ---------- khung sua BMC: rong hon + nut phong to ---------- */
 .drawer-tools { display: flex; gap: 4px; flex: none; }
