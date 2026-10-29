@@ -1389,7 +1389,10 @@ def make_handler(app):
         # ------------------------------------------------------------ agent
         def client_ip(self):
             if getattr(self, "_ip", None) is None:
-                self._ip = real_client_ip(self.client_address[0], self.headers, st.cfg)
+                headers = getattr(self, "headers", None)  # request het gio truoc khi doc xong header -> chua co
+                if headers is None:
+                    return self.client_address[0]
+                self._ip = real_client_ip(self.client_address[0], headers, st.cfg)
             return self._ip
 
         def agent_site(self):
@@ -2342,7 +2345,7 @@ def make_handler(app):
             action = data.get("action")
             fields = {k: v for k, v in dict(data.get("fields") or {}).items()
                       if k in ("auth", "console_auth", "enabled", "legacy_tls", "jsesp_cache", "java_web", "max_conns",
-                              "template", "tags", "expires")}
+                              "template", "tags", "expires", "host_header")}
             for site, _ in keys:
                 app.need_edit(u, site)
             wanted = set(keys)

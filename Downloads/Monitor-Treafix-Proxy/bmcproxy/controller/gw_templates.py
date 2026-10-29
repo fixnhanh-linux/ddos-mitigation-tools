@@ -81,6 +81,8 @@ def all_templates(custom):
     for k, t in BUILTIN_TEMPLATES.items():
         out[k] = {"host_header": "client", **t, "builtin": True}
     for k, t in (custom or {}).items():
+        if k in BUILTIN_TEMPLATES:  # ban sao cu cua mau co san trong templates.json -> khong de de len mau moi
+            continue
         out[k] = {"host_header": "client", **t, "builtin": False}
     return out
 

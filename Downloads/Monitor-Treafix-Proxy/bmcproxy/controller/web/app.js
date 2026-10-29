@@ -1970,6 +1970,7 @@ $("#bulk-bar").addEventListener("click", async (e) => {
   const presets = {
     "auth-on": { auth: true, console_auth: true }, "auth-off": { auth: false }, "console-off": { console_auth: false },
     disable: { enabled: false }, enable: { enabled: true },
+    "host-ip": { host_header: "upstream" }, "host-client": { host_header: "client" },
   };
   try {
     if (act === "delete") {
@@ -1987,10 +1988,10 @@ $("#bulk-bar").addEventListener("click", async (e) => {
     } else if (act === "template") {
       return formBox(`Đổi mẫu cho ${n} BMC`, [
         { type: "select", name: "template", label: "Mẫu", value: "", options: Object.entries(state.templates).map(([k, t]) => [k, t.label]) },
-        { type: "html", html: '<p class="hint">Chỉ đổi nhãn loại máy và TLS cũ / .jsesp / console Java trên web theo mẫu. Địa chỉ BMC và cổng giữ nguyên.</p>' },
+        { type: "html", html: '<p class="hint">Chỉ đổi nhãn loại máy và TLS cũ / .jsesp / console Java trên web / Host header theo mẫu. Địa chỉ BMC và cổng giữ nguyên.</p>' },
       ], async (d) => {
         const t = state.templates[d.template];
-        await api("POST", "bmcs/batch", { keys, action: "set", fields: { template: d.template, legacy_tls: t.legacy_tls, jsesp_cache: t.jsesp_cache, java_web: !!t.java_web, max_conns: t.max_conns || 0 } });
+        await api("POST", "bmcs/batch", { keys, action: "set", fields: { template: d.template, legacy_tls: t.legacy_tls, jsesp_cache: t.jsesp_cache, java_web: !!t.java_web, max_conns: t.max_conns || 0, host_header: t.host_header || "client" } });
         state.selected.clear();
         toast(`Đã đổi mẫu cho ${n} BMC`);
         await refreshAll();
