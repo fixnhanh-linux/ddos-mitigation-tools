@@ -13,15 +13,16 @@ RE_IPHOST = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
 # upstream: "default" = https://IP (cong 443) | "same" = https://IP:<cong proxy> | so = cong co dinh
 # console:  "none" = khong co | "same" = https://IP:<cong console> | so = cong co dinh tren BMC
 BUILTIN_TEMPLATES = {
-    "idrac9": {"label": "Dell iDRAC 9", "upstream": "default", "console": "none",
+    # iDRAC 9 kiem tra Host header: Host = ten mien proxy -> "QueryNotSupported" -> mac dinh Host = IP BMC
+    "idrac9": {"label": "Dell iDRAC 9", "upstream": "default", "console": "none", "host_header": "upstream",
                "legacy_tls": False, "jsesp_cache": False, "jnlp_path": "viewer.jnlp"},
     "idrac7-8": {"label": "Dell iDRAC 7 / 8", "upstream": "default", "console": "same",
                  "legacy_tls": False, "jsesp_cache": True, "java_ports": [5900], "jnlp_path": "viewer.jnlp"},
     "idrac6": {"label": "Dell iDRAC 6 (TLS cũ)", "upstream": "default", "console": "same",
                "legacy_tls": True, "jsesp_cache": False, "java_ports": [5900, 5901], "jnlp_path": "viewer.jnlp"},
-    "dell-c6420": {"label": "Dell C6420 (BMC9)", "upstream": "same", "console": "same",
+    "dell-c6420": {"label": "Dell C6420 (BMC9)", "upstream": "same", "console": "same", "host_header": "upstream",
                    "legacy_tls": False, "jsesp_cache": False, "jnlp_path": "viewer.jnlp"},
-    "dell-r640": {"label": "Dell R640", "upstream": "same", "console": "none",
+    "dell-r640": {"label": "Dell R640", "upstream": "same", "console": "none", "host_header": "upstream",
                   "legacy_tls": False, "jsesp_cache": False, "jnlp_path": "viewer.jnlp"},
     "dell-r620": {"label": "Dell R620", "upstream": "same", "console": "same",
                   "legacy_tls": False, "jsesp_cache": True, "jnlp_path": "viewer.jnlp"},
