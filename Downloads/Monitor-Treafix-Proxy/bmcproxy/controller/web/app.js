@@ -1906,6 +1906,8 @@ async function detectBmc() {
       ${r.title || r.server ? `<div class="kv-line">Trang: ${esc(r.title || "")}${r.server ? ` · server ${esc(r.server)}` : ""}</div>` : ""}
       ${(r.evidence || []).length ? `<div class="kv-line">Dựa vào: ${esc(r.evidence.join(", "))}</div>` : ""}
       ${extra.length ? `<div class="kv-line">Cổng khác đang mở: ${extra.join(", ")}</div>` : ""}
+      ${r.template === "idrac9" ? `<div class="kv-line">iDRAC 9: đã đặt Host = IP BMC. Vẫn báo <code>QueryNotSupported</code> thì SSH vào iDRAC chạy
+        <code>racadm set iDRAC.WebServer.HostHeaderCheck Disabled</code></div>` : ""}
       ${t ? `<div class="kv-line">Đã điền: cổng proxy <b>${esc(f.port.value || "?")}</b> → ${esc(upstream)}</div>`
         : '<div class="kv-line">Chọn loại máy bằng tay; Địa chỉ BMC đã điền theo cổng web tìm thấy.</div>'}`);
   } catch (err) { show("bad", esc(err.message)); } finally { btn.disabled = false; }

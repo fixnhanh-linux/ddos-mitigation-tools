@@ -834,7 +834,8 @@ EOF
 | Áp dụng lỗi `nginx.service is not active` | nginx chạy trong Docker: agent.json `"nginx_test_cmd": [], "nginx_reload_cmd": []`, restart agent, **Thử lại** |
 | Áp dụng lỗi “Kiểm tra cổng trống” | `sudo ss -ltnp \| grep :<cổng>`: tắt chương trình đang giữ cổng (vd docker-proxy) hoặc đổi cổng |
 | BMC tắt xác thực mà vẫn 401 | Chưa **Áp dụng**, hoặc agent chưa nhận bản mới: đợi “đã đồng bộ” |
-| iDRAC 9 báo `QueryNotSupported` (`restgui/index.html?…`) | BMC → Nâng cao → **Host header = IP của BMC** rồi **Áp dụng**. Mẫu `idrac9`, `dell-r640`, `dell-c6420` đã mặc định như vậy cho BMC tạo mới |
+| iDRAC 9 báo `QueryNotSupported` (`restgui/index.html?…`) | iDRAC từ chối Host = tên miền proxy (Host Header Check). Cách 1: BMC → Tương thích BMC → **Host header = IP của BMC** → **Áp dụng** (hoặc chọn nhiều BMC → **Host = IP BMC**). Cách 2 (chắc chắn nhất, làm trên từng iDRAC): SSH vào iDRAC chạy `racadm set iDRAC.WebServer.HostHeaderCheck Disabled` (hoặc web iDRAC → iDRAC Settings → Services → Web Server → Host Header Check = Disabled). Mẫu `idrac9`, `dell-r640`, `dell-c6420` đã mặc định Host = IP cho BMC tạo mới |
+| BMC (iDRAC...) báo `Bad Request ... ErrorDocument` (400) | Cookie của tên miền proxy quá lớn (> ~8 KB): mọi BMC cùng tên miền, chỉ khác cổng, nên cookie của mọi BMC dồn chung. Thử cửa sổ ẩn danh; xoá cookie của tên miền proxy (`chrome://settings/content/all`) |
 | QCT: `/rpc/*.asp` 502, Remote Control “Not Supported”, tự đăng xuất | Mẫu QCT/AMI (tối đa 4 kết nối); mỗi lúc 1 người dùng 1 BMC (BMC thấy mọi người cùng IP proxy); mở console bằng link **“Mở console Java”** |
 | File `.jnlp` tải về ghi `https://<tên-miền>:443` | Bản hiện tại tự sửa thành cổng proxy |
 | Console trên web treo, log `UnknownHostException: (null)` | Bản cũ thiếu `EXTRNIP`: cập nhật agent, `docker rm -f bmcgw-kvm-<cổng>` |

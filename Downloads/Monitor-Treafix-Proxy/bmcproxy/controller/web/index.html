@@ -540,7 +540,8 @@
               <option value="client">Tên miền proxy (đa số BMC)</option>
               <option value="upstream">IP của BMC (iDRAC 9)</option>
             </select>
-            <small class="help">Chọn IP nếu iDRAC 9 báo <code>QueryNotSupported</code>.</small></label>
+            <small class="help">iDRAC 9 báo <code>QueryNotSupported</code>: chọn IP, hoặc tắt kiểm tra Host trên iDRAC
+              (SSH vào iDRAC): <code>racadm set iDRAC.WebServer.HostHeaderCheck Disabled</code></small></label>
           <label>Số kết nối tối đa
             <input name="max_conns" type="number" min="0" max="32" placeholder="0 = không giới hạn">
             <small class="help">BMC yếu (QCT / AMI) để <b>4</b> để web IPMI khỏi treo / 502.</small></label>
