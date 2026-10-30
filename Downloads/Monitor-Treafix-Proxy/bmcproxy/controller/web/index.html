@@ -86,6 +86,9 @@
     </nav>
     <div class="side-foot">
       <div class="who" id="who-block"><span class="avatar" id="avatar"></span><div class="nav-lbl"><div id="whoami"></div><div class="role" id="whorole"></div></div></div>
+      <button id="btn-theme" class="btn ghost small side-btn theme-btn" type="button" title="Giao diện" data-tip="Giao diện">
+        <span class="ico" id="theme-ico"></span><span class="nav-lbl" id="theme-lbl">Giao diện: tự động</span>
+      </button>
       <button id="btn-logout" class="btn ghost small side-btn" title="Đăng xuất" data-tip="Đăng xuất">
         <span class="ico"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
         <span class="nav-lbl">Đăng xuất</span>
@@ -172,7 +175,7 @@
     <!-- BMC -->
     <section class="page hidden" id="page-bmcs">
       <div class="toolbar">
-        <div class="search"><input id="search" type="search" placeholder="Tìm cổng, IP, ghi chú…"></div>
+        <div class="search"><input id="search" type="search" placeholder="Tìm cổng, IP, ghi chú… (phím /)"></div>
         <select id="filter-site" aria-label="Lọc theo site"><option value="">Mọi site</option></select>
         <select id="filter-tag" aria-label="Lọc theo nhãn"><option value="">Mọi nhãn</option></select>
         <div class="chips" id="chips">
@@ -283,6 +286,13 @@
 
     <!-- Người dùng -->
     <section class="page hidden" id="page-users">
+      <div class="user-tools">
+        <input type="search" id="user-search" placeholder="Tìm tài khoản, họ tên, email, ghi chú…" aria-label="Tìm tài khoản">
+        <select id="user-role" aria-label="Lọc theo vai trò"><option value="">Mọi vai trò</option></select>
+        <select id="user-state" aria-label="Lọc theo trạng thái"><option value="">Mọi trạng thái</option>
+          <option value="active">Hoạt động</option><option value="off">Đã khoá / hết hạn</option>
+          <option value="online">Đang đăng nhập</option><option value="no2fa">Chưa bật 2FA</option></select>
+      </div>
       <div class="panel flush"><div class="table-wrap">
         <table class="table stack stack-main" id="user-table"><thead><tr><th>Tài khoản</th><th>Vai trò</th><th>Phạm vi</th><th>Trạng thái</th>
           <th>Đăng nhập cuối</th><th>Phiên</th><th></th></tr></thead>

@@ -380,6 +380,36 @@ function setCollapsed(on) {
   try { localStorage.setItem("bmcgw.sideCollapsed", on ? "1" : "0"); } catch { /* khong luu duoc thi thoi */ }
 }
 
+// Giao dien: tu dong (theo may) -> sang -> toi; nho theo trinh duyet
+const THEMES = {
+  auto: ["tự động", '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>'],
+  light: ["sáng", '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'],
+  dark: ["tối", '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'],
+};
+function setTheme(t, save = true) {
+  if (!THEMES[t]) t = "auto";
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.dataset.theme = t;
+  $("#theme-ico").innerHTML = THEMES[t][1];
+  $("#theme-lbl").textContent = `Giao diện: ${THEMES[t][0]}`;
+  $("#btn-theme").dataset.tip = $("#btn-theme").title = `Giao diện: ${THEMES[t][0]} (bấm để đổi)`;
+  $("#btn-theme").dataset.theme = t;
+  if (save) { try { localStorage.setItem("bmcgw.theme", t); } catch { /* khong luu duoc thi thoi */ } }
+}
+$("#btn-theme").addEventListener("click", () => {
+  const order = ["auto", "light", "dark"];
+  setTheme(order[(order.indexOf($("#btn-theme").dataset.theme) + 1) % order.length]);
+});
+try { setTheme(localStorage.getItem("bmcgw.theme") || "auto", false); } catch { setTheme("auto", false); }
+
+// Phim tat: "/" = o tim cua trang dang mo (BMC, Nguoi dung, Nhat ky...)
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]")) return;
+  const box = $$(`#page-${state.page} input[type=search], #page-${state.page} input[id*=search]`).find((i) => i.offsetParent);
+  if (box) { e.preventDefault(); box.focus(); box.select(); }
+});
+
 function initSidebar() {
   let saved = null;
   try { saved = localStorage.getItem("bmcgw.sideCollapsed"); } catch { }
@@ -824,7 +854,7 @@ function healthDot(h, siteOnline) {
 function consoleCell(b) {
   if (!b.console_port) return '<span class="cell-sub">—</span>';
   return `<div>${healthDot(b.health && b.health.console, b.site_online)} <span class="port">${b.console_port}</span></div>
-    <div class="mono cell-sub">${esc(b.console_upstream || "")}</div>`;
+    <div class="mono cell-sub clip" title="${esc(b.console_upstream || "")}">${esc((b.console_upstream || "").replace(/^https?:\/\//, ""))}</div>`;
 }
 
 function routerCell(b) {
@@ -888,7 +918,7 @@ function renderBmcs() {
     return `<tr class="clickable ${b.enabled ? "" : "off"} ${sel ? "selected" : ""}" data-site="${esc(b.site)}" data-port="${b.port}" tabindex="0">
       <td class="check">${canSelect(b.site) ? `<input type="checkbox" data-select="${esc(key)}" ${sel ? "checked" : ""} aria-label="Chọn BMC ${b.port}">` : ""}</td>
       <td>${healthDot(b.health && b.health.web, b.site_online)}</td>
-      <td><span class="tag">${esc(siteLabel(b.site))}</span></td>
+      <td><span class="tag site-tag" title="${esc(siteLabel(b.site))}">${esc(siteLabel(b.site))}</span></td>
       <td><div class="port">${b.port}</div></td>
       <td class="links">${linkCell(b)}</td>
       <td><div class="mono cell-main">${esc(b.upstream)}</div><div>${opts}</div></td>
@@ -1502,8 +1532,16 @@ $("#backup-list").addEventListener("click", async (e) => {
 
 // ------------------------------------------------------------------ Người dùng
 async function loadUsers() {
-  const list = await api("GET", "users");
-  state.users = list;
+  state.users = await api("GET", "users");
+  renderUsers();
+}
+function renderUsers() {
+  const q = $("#user-search").value.trim().toLowerCase();
+  const role = $("#user-role").value, st = $("#user-state").value;
+  const STATE = { active: (u) => u.status === "active", off: (u) => u.status !== "active",
+    online: (u) => (u.sessions || []).length > 0, no2fa: (u) => !u.totp && u.source !== "ldap" };
+  const list = (state.users || []).filter((u) => (!role || u.role === role) && (!st || STATE[st](u))
+    && (!q || [u.name, u.full_name, u.email, u.note, ...(u.sites || [])].join(" ").toLowerCase().includes(q)));
   const STATUS = { active: '<span class="tag ok">hoạt động</span>', disabled: '<span class="tag bad">đã khoá</span>',
     expired: '<span class="tag bad">hết hạn</span>' };
   $("#user-list").innerHTML = list.map((u) => {
@@ -1525,8 +1563,10 @@ async function loadUsers() {
       <button class="btn small" data-user-hist="${esc(u.name)}">Lịch sử</button>
       ${sess && u.name !== state.me.name ? `<button class="btn small" data-user-logout="${esc(u.name)}" title="Đăng xuất mọi phiên của tài khoản này">Đăng xuất</button>` : ""}
       ${u.name === state.me.name ? "" : `<button class="btn small danger-ghost" data-user-del="${esc(u.name)}">Xoá</button>`}</td></tr>`;
-  }).join("");
+  }).join("") || `<tr><td colspan="7" class="cell-sub" style="text-align:center;padding:24px">Không có tài khoản khớp bộ lọc.</td></tr>`;
 }
+$("#user-role").innerHTML += Object.entries(ROLE_LABEL).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+["#user-search", "#user-role", "#user-state"].forEach((s) => $(s).addEventListener("input", renderUsers));
 const fmtTime = (iso) => (iso ? String(iso).replace("T", " ").slice(0, 16) : "");
 $("#user-list").addEventListener("click", async (e) => {
   const ed = e.target.closest("[data-user-edit]");
@@ -2255,11 +2295,18 @@ function javaOpenUrl(b) {
   return l.web.replace(/\/$/, "") + "/" + path;
 }
 
+// proxybb-hcm.longvan.net:8005 -> proxybb-hcm…:8005 (tieu de / nut sao chep van la link day du)
+const shortLink = (url) => {
+  const m = url.match(/^https?:\/\/([^:/]+)(:\d+)?/);
+  if (!m) return url;
+  const host = m[1].split(".")[0];
+  return (m[1].includes(".") ? host + "…" : host) + (m[2] || "");
+};
 function linkCell(b, full) {
   const l = bmcLinks(b);
   if (!l) return '<span class="cell-sub">site chưa có tên miền</span>';
-  const one = (url, label) => `<div class="link-row"><span class="link-kind">${label}</span>
-    <a href="${esc(url)}" target="_blank" rel="noopener" class="mono">${esc(full ? url : url.replace(/^https:\/\//, "").replace(/\/$/, ""))}</a>
+  const one = (url, label, dot = "") => `<div class="link-row"><span class="link-kind">${dot}${label}</span>
+    <a href="${esc(url)}" target="_blank" rel="noopener" class="mono" title="${esc(url)}">${esc(full ? url : shortLink(url))}</a>
     <button type="button" class="btn icon-btn copy-btn" data-copy="${esc(url)}" title="Sao chép link" aria-label="Sao chép link">⧉</button></div>`;
   const java = (b.tcp_ports || []).length
     ? `<div class="link-row"><span class="link-kind">java</span><span class="mono cell-sub">${esc(fmtTcp(b.tcp_ports).replace(/:/g, "→"))}</span></div>` : "";
@@ -2269,7 +2316,7 @@ function linkCell(b, full) {
   const jweb = b.java_web ? `<div class="link-row"><span class="link-kind">java</span>
     <a href="${esc(l.web.replace(/\/$/, "") + "/" + jpath)}" target="_blank" rel="noopener"
        title="Đăng nhập BMC trước, rồi bấm để mở console Java ngay trên web">Mở console (${esc(jfile)})</a></div>` : "";
-  return one(l.web, "web") + (l.con ? one(l.con, "console") : "") + jweb + java + (b.enabled ? "" : '<div class="cell-sub">BMC đang tắt</div>');
+  return one(l.web, "web") + (l.con ? one(l.con, "console", healthDot(b.health && b.health.console, b.site_online)) : "") + jweb + java + (b.enabled ? "" : '<div class="cell-sub">BMC đang tắt</div>');
 }
 
 async function copyText(t) {

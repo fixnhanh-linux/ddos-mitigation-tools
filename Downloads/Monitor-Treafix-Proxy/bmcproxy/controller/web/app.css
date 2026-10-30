@@ -32,7 +32,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0b1117;
     --panel: #121a23;
     --panel-2: #172130;
@@ -61,6 +61,35 @@
     --shadow-lg: 0 12px 32px rgba(0, 0, 0, .5);
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #0b1117;
+    --panel: #121a23;
+    --panel-2: #172130;
+    --line: #243140;
+    --line-2: #1b2632;
+    --text: #e5ebf2;
+    --text-2: #b4c0cd;
+    --muted: #7f8c9b;
+    --accent: #14b8a6;
+    --accent-2: #2dd4bf;
+    --accent-soft: #0f2f2c;
+    --accent-text: #04201d;
+    --ok: #4ade80;
+    --ok-soft: #0f2a19;
+    --warn: #fbbf24;
+    --warn-soft: #2e2309;
+    --bad: #f87171;
+    --bad-soft: #351416;
+    --info: #93c5fd;
+    --info-soft: #11233d;
+    --side-bg: #080d12;
+    --side-active: #15212d;
+    --diff-add: #0f2a19;
+    --diff-del: #351416;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, .5);
+    color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -543,7 +572,7 @@ td.links { white-space: nowrap; }
 .link-row { display: flex; align-items: center; gap: 6px; line-height: 1.3; margin: 1px 0; }
 .link-row a { font-size: 12.5px; text-decoration: none; color: var(--accent); white-space: nowrap; }
 .link-row a:hover { text-decoration: underline; }
-.link-kind { font-size: 11px; color: var(--muted); width: 48px; flex: none; }
+.link-kind { font-size: 11px; color: var(--muted); min-width: 48px; flex: none; white-space: nowrap; }
 .copy-btn { width: 24px; height: 24px; font-size: 13px; padding: 0; flex: none; }
 .drawer-links { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .console-cell-wrap { display: flex; flex-direction: column; gap: 4px; }
@@ -851,3 +880,48 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
   .perm-groups { grid-template-columns: 1fr; }
   .perm-head { flex-direction: column; }
 }
+
+/* ---------- bang BMC tren may tinh: gon trong 1 man hinh, khong cuon ngang ---------- */
+@media (min-width: 901px) {
+  #bmc-table .site-tag { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+  #bmc-table td .clip { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bmc-table td:nth-child(6) .cell-main { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bmc-table td:nth-child(11) { max-width: 180px; }
+  #bmc-table td:nth-child(6) { max-width: 176px; }
+  #bmc-table td:nth-child(6) .tag { white-space: normal; }
+  /* dong java (cong TCP, file .jnlp) duoc xuong dong: khong keo rong cot link */
+  #bmc-table td.links { white-space: normal; max-width: 230px; }
+  #bmc-table .link-row .cell-sub, #bmc-table .link-row a:not(.mono) { white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+}
+@media (min-width: 901px) and (max-width: 1679px) {
+  /* man hinh vua: an cot Traefik + Luot truy cap (xem trong ngan sua BMC / trang Truy cap) */
+  #bmc-table th:nth-child(9), #bmc-table td:nth-child(9), #bmc-table th:nth-child(10), #bmc-table td:nth-child(10) { display: none; }
+  /* cot Console trung dong "console" o cot Link -> an; trang thai console hien bang cham mau canh link */
+  #bmc-table th:nth-child(7), #bmc-table td:nth-child(7) { display: none; }
+  #bmc-table td, #bmc-table th { padding-left: 7px; padding-right: 7px; }
+  #bmc-table td.links { max-width: 210px; }
+}
+
+.link-kind .dot { width: 7px; height: 7px; margin-right: 4px; vertical-align: 1px; }
+
+/* ---------- ra soat giao dien 30/10 ---------- */
+/* ten web tren menu: 1 dong, du dai thi "…" */
+.side-brand .nav-lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 14.5px; }
+/* the site o Tong quan: rong hon de khong cat ten site */
+.site-strip { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+/* 5 the so lieu: man vua 3 + 2, dien thoai 2 + 2 + 1 -> the cuoi rong ca hang */
+@media (max-width: 1200px) and (min-width: 901px) {
+  .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .kpis > .kpi { grid-column: span 2; }
+  .kpis > .kpi:nth-child(n+4) { grid-column: span 3; }
+}
+@media (max-width: 900px) { .kpis > .kpi:nth-child(5):last-child { grid-column: 1 / -1; } }
+
+/* nut doi giao dien sang / toi / tu dong (cuoi menu) */
+.theme-btn .ico svg { display: block; }
+/* trang Nguoi dung: o tim + loc vai tro */
+.user-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.user-tools input { flex: 1 1 220px; max-width: 320px; }
+.user-tools select { flex: 0 0 auto; }
+.kbd-hint { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+
