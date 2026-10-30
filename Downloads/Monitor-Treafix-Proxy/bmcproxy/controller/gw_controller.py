@@ -2866,7 +2866,7 @@ def make_handler(app):
         def overview(self, u):
             sites = [app.site_status(k) for k in app.visible_sites(u)]
             views = [v for v in app.bmc_views(u) if v["enabled"]]
-            auth = {"ok": 0, "deny": 0, "error": 0}
+            auth = {"ok": 0, "deny": 0, "error": 0, "open": 0}  # open: luot vao BMC tat xac thuc (agent chi ghi lai)
             denied = []
             for v in views:
                 s = v["auth_stats"] or {}

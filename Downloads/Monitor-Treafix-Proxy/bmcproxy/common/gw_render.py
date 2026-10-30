@@ -40,7 +40,7 @@ DEFAULT_PARAMS = {
 
 
 # Tang khi doi cach sinh file Traefik -> rev doi -> site hien "cho ap dung" de agent sinh lai file
-RENDER_VERSION = 11
+RENDER_VERSION = 12
 
 
 def release_rev(domain, settings, bmcs, dashboard=None):
@@ -202,6 +202,13 @@ def render_bmc(b, params):
             "trustForwardHeader": False,
             "maxResponseBodySize": 65536,
         }}
+    if not b["auth"] or (b["console_port"] and not b["console_auth"]):
+        # BMC tat xac thuc: agent khong bat dang nhap, chi ghi luot truy cap + ap dung quy tac chan IP
+        middlewares[f"{name}-watch"] = {"forwardAuth": {
+            "address": f"http://{params['auth_host']}:{params['auth_port']}/auth/{b['port']}?open=1",
+            "trustForwardHeader": False,
+            "maxResponseBodySize": 4096,
+        }}
 
     # BMC loi 502/503/504 (mat mang, treo, TLS) -> trang loi IPMI do agent chan doan
     services[f"{name}-errpage"] = {"loadBalancer": {
@@ -216,7 +223,7 @@ def render_bmc(b, params):
         "query": f"/__bmcgw/error?status={{status}}&port={b['port']}&kind=reject"}}
 
     def chain(auth, kind="web"):
-        return ["bmc-cors", "bmc-headers"] + ([f"{name}-auth"] if auth else []) + [f"{name}-err-{kind}", "bmc-retry"]
+        return ["bmc-cors", "bmc-headers"] + [f"{name}-auth" if auth else f"{name}-watch"] + [f"{name}-err-{kind}", "bmc-retry"]
 
     def service(url):
         return {"loadBalancer": {

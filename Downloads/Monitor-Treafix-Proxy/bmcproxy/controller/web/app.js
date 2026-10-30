@@ -540,7 +540,7 @@ async function loadStats(force = false) {
       <b class="port">${b.port}</b>
       <span class="grow"><span class="rank-txt" title="${esc((b.note || "") + " · " + siteLabel(b.site))}">${esc(b.note || "—")} <span class="cell-sub">· ${esc(siteLabel(b.site))}</span></span>
         <span class="rank-bar"><i style="width:${Math.round((b.count / top) * 100)}%"></i></span></span>
-      <b class="num">${fmtNum(b.count)}</b></div>`).join("") || '<div class="list-empty">Chưa có lượt truy cập (agent cần bản mới).</div>';
+      <b class="num">${fmtNum(b.count)}</b></div>`).join("") || '<div class="list-empty">Chưa có lượt truy cập. Site cần agent bản mới (Site → Cập nhật agent) rồi Áp dụng.</div>';
   $("#ov-top-users").innerHTML = s.top_users.map((x) => `<div class="list-item">
       <span class="grow" title="${esc(x.user)}">${esc(x.user)}</span><span class="cell-sub">${x.ips} IP · ${esc(fmtTs(x.last).slice(5, 16))}</span>
       <b class="num">${fmtNum(x.count)}</b></div>`).join("") || '<div class="list-empty">Chưa có.</div>';
@@ -578,13 +578,13 @@ function renderOverview() {
   if (!o) return;
   if (state.page === "overview") loadStats().catch(() => { });
   const online = o.sites.filter((s) => s.online).length;
-  const authTotal = o.auth.ok + o.auth.deny + o.auth.error;
+  const authTotal = o.auth.ok + o.auth.deny + o.auth.error + (o.auth.open || 0);
   const kpis = [
     { lbl: "Site trực tuyến", num: `${online}/${o.sites.length}`, foot: "agent đang kết nối", cls: online < o.sites.length ? "bad" : "ok" },
     { lbl: "BMC hoạt động", num: o.bmcs, foot: o.checked ? `${o.checked - o.down.length} kết nối được` : "đang chờ kết quả", cls: "accent" },
     { lbl: "Mất kết nối", num: o.down.length, foot: "server không mở được TCP tới BMC", cls: o.down.length ? "bad" : "ok" },
     { lbl: "Chưa xác thực", num: o.open, foot: "cổng mở cho mọi người", cls: o.open ? "bad" : "ok" },
-    { lbl: "Lượt xác thực", num: fmtNum(authTotal), foot: can("stats") ? `<a href="#blocked">${fmtNum(o.auth.deny)} bị chặn</a> · ${fmtNum(o.auth.error)} lỗi`
+    { lbl: "Lượt xác thực", num: fmtNum(authTotal), foot: can("stats") ? `<a href="#blocked">${fmtNum(o.auth.deny)} bị chặn</a> · ${fmtNum(o.auth.error)} lỗi${o.auth.open ? ` · ${fmtNum(o.auth.open)} không đăng nhập` : ""}`
       : `${fmtNum(o.auth.deny)} bị chặn · ${fmtNum(o.auth.error)} lỗi`, html: true, cls: o.auth.error ? "warn" : "" },
   ];
   $("#kpis").innerHTML = kpis.map((k) => `<div class="kpi ${k.cls}">
@@ -1530,7 +1530,7 @@ function renderAccess() {
       <td class="mono">${esc(a.ip)}</td><td><span class="tag">${esc(siteLabel(a.site))}</span></td>
       <td><b class="mono">${esc(a.port)}</b>${a.note ? `<div class="cell-sub">${esc(a.note)}</div>` : ""}</td>
       <td><span class="tag ${cls}" title="${esc(a.path || "")}">${label}</span></td></tr>`;
-  }).join("") || '<tr><td colspan="6" class="hint" style="padding:24px">Chưa có lượt truy cập nào (agent cần bản mới).</td></tr>';
+  }).join("") || '<tr><td colspan="6" class="hint" style="padding:24px">Chưa có lượt truy cập nào. Site cần agent bản mới (Site → Cập nhật agent) rồi Áp dụng.</td></tr>';
 }
 $("#btn-access-csv").addEventListener("click", () => {
   const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;

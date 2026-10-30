@@ -330,6 +330,16 @@ class SiteTest(unittest.TestCase):
         self.assertEqual(gw.check(8002, "", "", "198.51.100.7", "/")[0], 401)  # cho phep chi cong 8001
         for _ in range(3):
             gw.check(8002, "", "", "192.0.2.50", "/login.html")
+        # BMC tat xac thuc (open): cho vao, ghi luot truy cap; IP bi chan van bi chan
+        gw.pop_access()
+        self.assertEqual(gw.check(8002, "", "", "192.0.2.77", "/index.html", open_mode=True)[0], 200)
+        self.assertEqual(gw.check(8002, "", "", "203.0.113.9", "/", open_mode=True)[0], 403)
+        self.assertEqual([(a["ip"], a["user"]) for a in gw.pop_access()], [("192.0.2.77", "(không đăng nhập)")])
+        import gw_render
+        y = gw_render.render_bmc({"site": "hcm", "port": 8003, "upstream": "https://10.0.0.5", "auth": False},
+                                 gw_render.DEFAULT_PARAMS)
+        self.assertIn("/auth/8003?open=1", y)
+        self.assertIn("bmc-8003-watch", y)
         den = {(d["ip"], d["reason"]): d for d in gw.pop_denied()}
         self.assertEqual(den[("192.0.2.50", "no-login")]["count"], 3)
         self.assertEqual(den[("203.0.113.9", "blocked")]["count"], 1)

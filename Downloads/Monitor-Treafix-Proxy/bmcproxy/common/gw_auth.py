@@ -68,7 +68,7 @@ class AuthGateway:
 
     def _count(self, port, kind):
         with self.lock:
-            s = self.stats.setdefault(port, {"ok": 0, "deny": 0, "error": 0, "last": None})
+            s = self.stats.setdefault(port, {"ok": 0, "deny": 0, "error": 0, "open": 0, "last": None})
             s[kind] += 1
             s["last"] = now_iso()
 
@@ -249,14 +249,19 @@ class AuthGateway:
         with self.lock:
             self.access = (items + self.access)[-3000:]
 
-    def check(self, port, cookie, guest_token="", ip="", uri=""):
-        """Tra ve (ma HTTP cho Traefik, header them vao request toi BMC)."""
+    def check(self, port, cookie, guest_token="", ip="", uri="", open_mode=False):
+        """Tra ve (ma HTTP cho Traefik, header them vao request toi BMC).
+        open_mode: BMC tat xac thuc - khong bat dang nhap, chi chan IP bi chan + ghi luot truy cap."""
         bmc = self._bmc(port)
         if not bmc or not bmc.get("enabled", True):
             return self._deny(port, ip, "disabled", uri, 403)
         rule = self.ip_rule(port, ip) if ip else None
         if rule and rule[0] == "block":  # IP bi chan: ke ca da dang nhap / co link khach
             return self._deny(port, ip, "blocked", uri, 403)
+        if open_mode:
+            self._count(port, "open")
+            self.log_access(port, ip, "(không đăng nhập)", uri)
+            return 200, {}
         if rule and rule[0] == "allow":  # IP duoc phep (van phong / NOC): vao khong can dang nhap
             self._count(port, "ok")
             self.log_access(port, ip, f"IP cho phép{': ' + rule[1] if rule[1] else ''}", uri)
@@ -463,7 +468,8 @@ def make_auth_handler(gateway):
             else:
                 code, headers = gateway.check(int(m.group(1)), self.cookie("proxyauthcookie"),
                                               self.cookie("bmcgw_guest"), self.client_ip(),
-                                              self.headers.get("X-Forwarded-Uri") or "")
+                                              self.headers.get("X-Forwarded-Uri") or "",
+                                              open_mode="open=1" in urllib.parse.urlparse(self.path).query)
             body = b"" if code == 200 else {401: b"Unauthorized", 403: b"Forbidden"}.get(
                 code, b"Not found")
             self.send_response(code)
