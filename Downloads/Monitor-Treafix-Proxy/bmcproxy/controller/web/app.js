@@ -128,11 +128,12 @@ const isAdmin = () => state.me && state.me.role === "admin";
 const PERM_LABEL = {
   bmc_add: "Thêm BMC", bmc_edit: "Sửa BMC", bmc_delete: "Xoá BMC", apply: "Áp dụng / khôi phục cấu hình",
   detect: "Dò BMC, kiểm tra kết nối, nhập nginx", guests: "Tạo / thu hồi link khách", maint: "Đặt lịch bảo trì",
-  stats: "Xem thống kê & lịch sử truy cập", audit: "Xem nhật ký thao tác", export: "Xuất CSV",
+  stats: "Xem thống kê, truy cập & lượt bị chặn", audit: "Xem nhật ký thao tác", export: "Xuất CSV",
+  iprules: "Chặn / cho phép IP",
 };
 const PERM_GROUPS = [["BMC", ["bmc_add", "bmc_edit", "bmc_delete", "export"]], ["Site", ["apply", "detect", "maint", "guests"]],
-  ["Xem", ["stats", "audit"]]];
-const ROLE_PERMS = { operator: Object.keys(PERM_LABEL), viewer: ["export"] };
+  ["Xem & bảo vệ", ["stats", "audit", "iprules"]]];
+const ROLE_PERMS = { operator: Object.keys(PERM_LABEL).filter((k) => k !== "iprules"), viewer: ["export"] };
 const can = (perm, site) => !!state.me && (state.me.role === "admin" || (state.me.role !== "customer" &&
   (state.me.perms || []).includes(perm) && (site === undefined || !state.me.sites.length || state.me.sites.includes(site))));
 const canEdit = (site) => can("bmc_edit", site);
@@ -253,6 +254,7 @@ const PAGES = {
   bmcs: { title: "BMC", sub: "Mỗi BMC được mở qua một cổng riêng trên server Traefik của site" },
   traefik: { title: "Traefik", sub: "Router đang chạy trên từng server" },
   access: { title: "Truy cập BMC", sub: "Ai mở BMC / console nào, lúc nào, từ đâu · link tạm cho khách" },
+  blocked: { title: "Chặn IP", sub: "Lượt bị từ chối theo IP · chặn hẳn hoặc cho phép IP vào BMC" },
   my: { title: "BMC của tôi", sub: "Mở trang quản trị server (IPMI) của bạn ngay trên trình duyệt" },
   audit: { title: "Nhật ký", sub: "Ai đã làm gì, lúc nào" },
   backups: { title: "Sao lưu", sub: "Tự sao lưu trước mỗi lần nhập, khôi phục, xoá site" },
@@ -329,6 +331,7 @@ function route() {
   if (page === "backups") loadBackups();
   if (page === "audit") loadAudit();
   if (page === "access") loadAccess();
+  if (page === "blocked") loadBlocked();
   if (page === "my") loadMy();
   if (page === "overview") loadStats().catch(() => { });
   if (page === "users") loadUsers();
@@ -581,10 +584,11 @@ function renderOverview() {
     { lbl: "BMC hoạt động", num: o.bmcs, foot: o.checked ? `${o.checked - o.down.length} kết nối được` : "đang chờ kết quả", cls: "accent" },
     { lbl: "Mất kết nối", num: o.down.length, foot: "server không mở được TCP tới BMC", cls: o.down.length ? "bad" : "ok" },
     { lbl: "Chưa xác thực", num: o.open, foot: "cổng mở cho mọi người", cls: o.open ? "bad" : "ok" },
-    { lbl: "Lượt xác thực", num: fmtNum(authTotal), foot: `${fmtNum(o.auth.deny)} bị chặn · ${fmtNum(o.auth.error)} lỗi`, cls: o.auth.error ? "warn" : "" },
+    { lbl: "Lượt xác thực", num: fmtNum(authTotal), foot: can("stats") ? `<a href="#blocked">${fmtNum(o.auth.deny)} bị chặn</a> · ${fmtNum(o.auth.error)} lỗi`
+      : `${fmtNum(o.auth.deny)} bị chặn · ${fmtNum(o.auth.error)} lỗi`, html: true, cls: o.auth.error ? "warn" : "" },
   ];
   $("#kpis").innerHTML = kpis.map((k) => `<div class="kpi ${k.cls}">
-    <div class="lbl">${k.lbl}</div><div class="num">${k.num}</div><div class="foot">${esc(k.foot)}</div></div>`).join("");
+    <div class="lbl">${k.lbl}</div><div class="num">${k.num}</div><div class="foot">${k.html ? k.foot : esc(k.foot)}</div></div>`).join("");
 
   $("#ov-sites").innerHTML = o.sites.map((s) => `<a class="site-mini" href="#sites">
     <div class="top">${siteDot(s)}<span class="grow">${esc(s.label)}</span>${phaseTag(s)}</div>
@@ -1410,6 +1414,101 @@ const ACCESS_KIND = { web: ["", "trang BMC"], console: ["info", "console"], "gue
 let accessRows = [];
 ["#access-site", "#access-kind"].forEach((id) => $(id).addEventListener("input", renderAccess));
 $("#access-q").addEventListener("input", renderAccess);
+// ------------------------------------------------------------------ Chặn IP
+const DENY_LABEL = { "no-login": ["", "chưa đăng nhập"], session: ["warn", "phiên hết hạn / bị khoá"], target: ["warn", "sai target"],
+  disabled: ["", "BMC đang tắt"], blocked: ["bad", "IP bị chặn"], other: ["", "khác"] };
+let blockedData = { rows: [] }, ipRules = [];
+async function loadBlocked() {
+  const sel = $("#blocked-site");
+  if (sel.options.length <= 1) sel.innerHTML += state.sites.map((s) => `<option value="${esc(s.key)}">${esc(s.label)}</option>`).join("");
+  const rs = $("#blocked-reason");
+  if (rs.options.length <= 1) rs.innerHTML += Object.entries(DENY_LABEL).map(([k, [, l]]) => `<option value="${k}">${esc(l)}</option>`).join("");
+  $("#btn-iprule-add").classList.toggle("hidden", !can("iprules"));
+  [blockedData, ipRules] = await Promise.all([api("GET", `blocked?days=${$("#blocked-days").value}`), api("GET", "iprules")]);
+  renderIpRules();
+  renderBlocked();
+}
+function renderIpRules() {
+  const active = ipRules.filter((r) => r.status === "active");
+  $("#nav-rule-count").textContent = active.length || "";
+  $("#iprule-list").innerHTML = ipRules.map((r) => `<tr class="${r.status === "active" ? "" : "off"}">
+    <td class="mono"><b>${esc(r.cidr)}</b></td>
+    <td>${r.action === "block" ? '<span class="tag bad">chặn</span>' : '<span class="tag ok">cho phép</span>'}</td>
+    <td><span class="tag">${esc(siteLabel(r.site))}</span> ${r.port ? `<span class="mono">cổng ${r.port}</span>` : '<span class="cell-sub">mọi BMC</span>'}</td>
+    <td>${r.status === "expired" ? '<span class="tag">đã hết hạn</span>' : r.expires ? `<span class="mono cell-sub">${esc(r.expires.replace("T", " "))}</span>` : '<span class="cell-sub">không hạn</span>'}</td>
+    <td>${esc(r.note || "")}</td><td class="cell-sub">${esc(r.created_by || "")}<div>${esc(fmtTs(r.created_at || ""))}</div></td>
+    <td style="text-align:right">${can("iprules", r.site) ? `<button class="btn small danger-ghost" data-iprule-del="${esc(r.id)}">Xoá</button>` : ""}</td></tr>`).join("")
+    || '<tr><td colspan="7" class="hint" style="padding:18px">Chưa có quy tắc nào.</td></tr>';
+}
+function blockedFiltered() {
+  const site = $("#blocked-site").value, reason = $("#blocked-reason").value, q = $("#blocked-q").value.trim().toLowerCase();
+  return blockedData.rows.filter((r) => (!site || r.site === site) && (!reason || r.reasons[reason])
+    && (!q || [r.ip, r.port, r.note].some((x) => String(x ?? "").toLowerCase().includes(q))));
+}
+function renderBlocked() {
+  const list = blockedFiltered();
+  const d = blockedData;
+  $("#blocked-kpis").innerHTML = [
+    ["Lượt bị chặn", fmtNum(d.total || 0), `${d.days} ngày qua`, d.total ? "warn" : "ok"],
+    ["IP khác nhau", fmtNum(d.ips || 0), "bị từ chối ít nhất 1 lần", ""],
+    ["IP nhiều nhất", d.top_ips && d.top_ips[0] ? esc(d.top_ips[0][0]) : "-", d.top_ips && d.top_ips[0] ? `${fmtNum(d.top_ips[0][1])} lần` : "", ""],
+    ["Đang chặn", ipRules.filter((r) => r.status === "active" && r.action === "block").length, "quy tắc chặn IP", ""],
+    ["Đang cho phép", ipRules.filter((r) => r.status === "active" && r.action === "allow").length, "IP vào không cần đăng nhập", "accent"],
+  ].map(([l, n, f, c]) => `<div class="kpi ${c}"><div class="lbl">${l}</div><div class="num">${n}</div><div class="foot">${f}</div></div>`).join("");
+  $("#blocked-count").textContent = `${list.length} / ${d.rows.length} dòng`;
+  $("#blocked-list").innerHTML = list.slice(0, 500).map((r) => {
+    const reasons = Object.entries(r.reasons).sort((a, b) => b[1] - a[1]).map(([k, n]) => {
+      const [cls, l] = DENY_LABEL[k] || ["", k];
+      return `<span class="tag ${cls}" title="${fmtNum(n)} lần">${esc(l)}</span>`;
+    }).join(" ");
+    const act = can("iprules", r.site) ? (r.rule === "block" ? '<span class="cell-sub">đang chặn</span>'
+      : `<button class="btn small danger-ghost" data-block-ip="${esc(r.ip)}" data-site="${esc(r.site)}" data-port="${r.port}">Chặn IP</button>
+         <button class="btn small" data-allow-ip="${esc(r.ip)}" data-site="${esc(r.site)}" data-port="${r.port}">Cho phép</button>`) : "";
+    return `<tr><td class="mono"><b>${esc(r.ip || "?")}</b>${r.rule === "allow" ? ' <span class="tag ok">cho phép</span>' : ""}</td>
+      <td><span class="tag">${esc(siteLabel(r.site))}</span></td>
+      <td><b class="mono">${r.port}</b>${r.note ? `<div class="cell-sub">${esc(r.note)}</div>` : ""}</td>
+      <td class="mono"><b>${fmtNum(r.count)}</b></td><td>${reasons}</td>
+      <td class="mono cell-sub" title="lần đầu ${esc(fmtTs(r.first))}">${esc(fmtTs(r.last))}</td>
+      <td style="text-align:right;white-space:nowrap">${act}</td></tr>`;
+  }).join("") || '<tr><td colspan="7" class="hint" style="padding:24px">Chưa có lượt bị chặn nào (agent cần bản mới để ghi IP bị chặn).</td></tr>';
+}
+["#blocked-q", "#blocked-site", "#blocked-reason"].forEach((s) => $(s).addEventListener("input", renderBlocked));
+$("#blocked-days").addEventListener("change", loadBlocked);
+function ipRuleForm(pre = {}) {
+  const sites = state.sites.filter((s) => can("iprules", s.key));
+  if (!sites.length) return toast("Bạn không có quyền chặn / cho phép IP", true);
+  formBox(pre.action === "allow" ? "Cho phép IP" : pre.action === "block" ? "Chặn IP" : "Thêm quy tắc IP", [
+    { name: "cidr", label: "IP hoặc dải IP", value: pre.cidr || "", placeholder: "1.2.3.4 hoặc 1.2.3.0/24", span: false },
+    { type: "select", name: "action", label: "Loại", value: pre.action || "block", span: false,
+      options: [["block", "Chặn - không mở được BMC"], ["allow", "Cho phép - vào BMC không cần đăng nhập"]] },
+    { type: "select", name: "site", label: "Site", value: pre.site || sites[0].key, span: false, options: sites.map((s) => [s.key, s.label]) },
+    { name: "port", label: "Chỉ BMC cổng (để trống = mọi BMC của site)", value: pre.port || "", placeholder: "vd 8001", span: false },
+    { type: "select", name: "hours", label: "Thời hạn", value: pre.action === "allow" ? "24" : "0", span: false,
+      options: [["1", "1 giờ"], ["24", "1 ngày"], ["168", "7 ngày"], ["720", "30 ngày"], ["0", "Không hạn"]] },
+    { name: "note", label: "Ghi chú", value: pre.note || "", placeholder: "vd bot quét cổng, văn phòng NOC", span: false },
+    { type: "html", html: '<p class="hint">Chặn ưu tiên hơn cho phép. <b>Cho phép</b> = ai dùng IP này (cả máy khác cùng mạng NAT) vào thẳng trang đăng nhập BMC,'
+      + ' chỉ dùng cho IP tĩnh tin cậy, nên đặt thời hạn. Tối đa dải /16.</p>' },
+  ], async (d) => {
+    const r = await api("POST", "iprules", d);
+    toast(`${r.action === "block" ? "Đã chặn" : "Đã cho phép"} ${r.cidr}` + (r.site_online ? " · agent nhận trong ~10 giây" : " · agent đang mất kết nối"));
+    loadBlocked();
+  }, pre.action === "allow" ? "Cho phép" : pre.action === "block" ? "Chặn" : "Lưu");
+}
+$("#btn-iprule-add").addEventListener("click", () => ipRuleForm());
+$("#page-blocked").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-block-ip], [data-allow-ip]");
+  if (b) {
+    const allow = !!b.dataset.allowIp;
+    return ipRuleForm({ cidr: b.dataset.allowIp || b.dataset.blockIp, action: allow ? "allow" : "block", site: b.dataset.site,
+      port: allow ? b.dataset.port : "", note: allow ? "" : "bị chặn nhiều lần" });
+  }
+  const del = e.target.closest("[data-iprule-del]");
+  if (del && await confirmBox("Xoá quy tắc IP", "Xoá quy tắc này? Agent bỏ áp dụng trong ~10 giây.", "Xoá")) {
+    try { await api("DELETE", `iprules/${del.dataset.ipruleDel}`); toast("Đã xoá quy tắc"); loadBlocked(); }
+    catch (err) { toast(err.message, true); }
+  }
+});
+
 async function loadAccess() {
   const [rows] = await Promise.all([api("GET", "access?limit=3000"), loadGuests()]);
   accessRows = rows;

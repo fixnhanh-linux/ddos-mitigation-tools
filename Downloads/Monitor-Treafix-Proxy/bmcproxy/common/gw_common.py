@@ -49,9 +49,12 @@ PERMS = {
     "bmc_add": "thêm BMC", "bmc_edit": "sửa BMC", "bmc_delete": "xoá BMC",
     "apply": "áp dụng / khôi phục cấu hình", "detect": "dò BMC, kiểm tra, lấy BMC từ agent",
     "guests": "tạo / thu hồi link khách", "maint": "đặt lịch bảo trì",
-    "stats": "xem thống kê & lịch sử truy cập", "audit": "xem nhật ký thao tác", "export": "xuất danh sách BMC (CSV)",
+    "stats": "xem thống kê, lịch sử truy cập & lượt bị chặn", "audit": "xem nhật ký thao tác", "export": "xuất danh sách BMC (CSV)",
+    "iprules": "chặn / cho phép IP",
 }
-ROLE_PERMS = {"admin": tuple(PERMS), "operator": tuple(PERMS), "viewer": ("export",), "customer": ()}
+# Van hanh mac dinh khong duoc chan / cho phep IP (cho phep IP = vao BMC khong can dang nhap): quan tri tick them
+ROLE_PERMS = {"admin": tuple(PERMS), "operator": tuple(p for p in PERMS if p != "iprules"), "viewer": ("export",),
+              "customer": ()}
 
 
 def user_perms(rec):

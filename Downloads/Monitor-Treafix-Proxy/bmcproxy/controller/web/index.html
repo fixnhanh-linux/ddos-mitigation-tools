@@ -53,6 +53,10 @@
         <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
         <span class="nav-lbl">Truy cập BMC</span><span class="count" id="nav-guest-count"></span>
       </a>
+      <a href="#blocked" data-page="blocked" data-perm="stats" title="Chặn IP" data-tip="Chặn IP">
+        <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg></span>
+        <span class="nav-lbl">Chặn IP</span><span class="count" id="nav-rule-count"></span>
+      </a>
       <div class="nav-group nav-lbl">Quản lý</div>
       <a href="#sites" data-page="sites" title="Site" data-tip="Site">
         <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
@@ -235,6 +239,31 @@
     </section>
 
     <!-- Truy cập BMC -->
+    <section class="page hidden" id="page-blocked">
+      <div class="panel" id="iprule-panel">
+        <div class="panel-head"><h2>Quy tắc IP</h2>
+          <span class="hint">Chặn: IP không mở được BMC dù đã đăng nhập. Cho phép: IP vào BMC không cần đăng nhập web.
+            Agent nhận trong ~10 giây, không cần Áp dụng.</span>
+          <button class="btn primary small" id="btn-iprule-add" type="button">+ Thêm quy tắc</button></div>
+        <div class="table-wrap"><table class="table stack"><thead><tr><th>IP / dải</th><th>Loại</th><th>Phạm vi</th><th>Hết hạn</th><th>Ghi chú</th><th>Người tạo</th><th></th></tr></thead>
+          <tbody id="iprule-list"></tbody></table></div>
+      </div>
+      <div class="kpis blocked-kpis mt" id="blocked-kpis"></div>
+      <div class="toolbar audit-tools">
+        <input id="blocked-q" type="search" placeholder="Tìm IP, cổng, ghi chú BMC…" aria-label="Tìm lượt bị chặn">
+        <select id="blocked-site" aria-label="Lọc site"><option value="">Mọi site</option></select>
+        <select id="blocked-reason" aria-label="Lọc lý do"><option value="">Mọi lý do</option></select>
+        <select id="blocked-days" aria-label="Khoảng thời gian"><option value="1">24 giờ</option><option value="7" selected>7 ngày</option><option value="30">30 ngày</option></select>
+        <span id="blocked-count" class="hint"></span>
+      </div>
+      <div class="panel flush"><div class="table-wrap">
+        <table class="table stack"><thead><tr><th>IP</th><th>Site</th><th>BMC</th><th>Số lần</th><th>Lý do</th><th>Lần cuối</th><th></th></tr></thead>
+          <tbody id="blocked-list"></tbody></table>
+      </div></div>
+      <p class="hint mt">Đếm theo từng request bị từ chối (1 lần mở trang chưa đăng nhập = nhiều request). Phần lớn "chưa đăng nhập" từ IP lạ là bot quét cổng.
+        IP là địa chỉ Traefik thấy: nếu site đứng sau proxy khác (nginx, Cloudflare) thì đó là IP của proxy đó. Cần agent bản mới.</p>
+    </section>
+
     <section class="page hidden" id="page-access">
       <div class="panel" id="guest-panel">
         <div class="panel-head"><h2>Link tạm cho khách</h2><span class="hint">Tạo ở trang BMC → bấm vào BMC → <b>Link khách</b></span></div>

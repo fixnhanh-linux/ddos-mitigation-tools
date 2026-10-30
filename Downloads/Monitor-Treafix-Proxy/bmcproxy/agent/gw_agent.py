@@ -343,16 +343,21 @@ class Agent:
         access = self.gateway.pop_access()  # lan mo BMC / console (gui 1 lan, loi thi gui lai)
         if access:
             hb["access"] = access
+        denied = self.gateway.pop_denied()  # lan bi chan (gom theo IP + cong + ly do)
+        if denied:
+            hb["denied"] = denied
         try:
             status, resp = self.call("POST", "sync", hb)
         except OSError as e:
             self.gateway.requeue_access(access)
+            self.gateway.requeue_denied(denied)
             if self.controller_ok is not False:
                 log(f"không kết nối được controller: {e}")
             self.controller_ok = False
             return
         if status != 200 or not isinstance(resp, dict):
             self.gateway.requeue_access(access)
+            self.gateway.requeue_denied(denied)
             log(f"controller trả lỗi {status}: {resp}")
             self.controller_ok = False
             return
@@ -360,6 +365,8 @@ class Agent:
             self.gateway.set_guests(resp["guests"])
         if "maint" in resp:
             self.gateway.set_maint(resp["maint"])
+        if "ip_rules" in resp:
+            self.gateway.set_ip_rules(resp["ip_rules"])
         if self.controller_ok is not True:
             log("đã kết nối controller")
         self.controller_ok = True

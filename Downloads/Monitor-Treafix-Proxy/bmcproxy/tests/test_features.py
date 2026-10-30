@@ -287,6 +287,50 @@ class SiteTest(unittest.TestCase):
         lst = req(self.port, "GET", "/api/guests", None, self.ck)[2]
         self.assertEqual(next(x for x in lst if x["id"] == g["id"])["status"], "revoked")
 
+    def test_ip_rules_and_blocked_log(self):
+        from gw_auth import AuthGateway
+        # web: tao quy tac -> agent nhan qua sync; dai qua rong / IP sai bi tu choi
+        bad = [{"cidr": "10.0.0.0/8", "action": "allow"}, {"cidr": "1.2.3", "action": "block"}, {"cidr": "1.2.3.4", "action": "x"}]
+        for d in bad:
+            self.assertEqual(req(self.port, "POST", "/api/iprules", {"site": "hcm", **d}, self.ck)[0], 400, d)
+        s, _, blk = req(self.port, "POST", "/api/iprules", {"site": "hcm", "cidr": "203.0.113.9", "action": "block", "note": "bot"}, self.ck)
+        self.assertEqual(s, 201, blk)
+        s, _, alw = req(self.port, "POST", "/api/iprules", {"site": "hcm", "cidr": "198.51.100.0/24", "action": "allow",
+                                                            "port": 8001, "hours": 2}, self.ck)
+        self.assertEqual(s, 201, alw)
+        rules = self.sync()[2]["ip_rules"]
+        self.assertEqual(sorted(r["cidr"] for r in rules), ["198.51.100.0/24", "203.0.113.9/32"])
+        # agent: chan uu tien hon link khach, cho phep vao khong can cookie (chi dung cong), lan bi chan duoc gom
+        gw = AuthGateway(lambda: {"bmcs": [{"port": 8001, "enabled": True}, {"port": 8002, "enabled": True}]})
+        gw.set_ip_rules(rules)
+        self.assertEqual(gw.check(8001, "", "", "203.0.113.9", "/")[0], 403)
+        code, h = gw.check(8001, "", "", "198.51.100.7", "/index.html")
+        self.assertEqual((code, h.get("Token-ip-allow")), (200, "true"))
+        self.assertEqual(gw.check(8002, "", "", "198.51.100.7", "/")[0], 401)  # cho phep chi cong 8001
+        for _ in range(3):
+            gw.check(8002, "", "", "192.0.2.50", "/login.html")
+        den = {(d["ip"], d["reason"]): d for d in gw.pop_denied()}
+        self.assertEqual(den[("192.0.2.50", "no-login")]["count"], 3)
+        self.assertEqual(den[("203.0.113.9", "blocked")]["count"], 1)
+        self.assertEqual(gw.pop_denied(), [])
+        # agent gui ve -> trang Chan IP gom theo IP
+        self.assertEqual(self.sync({"denied": list(den.values())})[0], 200)
+        r = req(self.port, "GET", "/api/blocked?days=1", None, self.ck)[2]
+        row = next(x for x in r["rows"] if x["ip"] == "192.0.2.50")
+        self.assertEqual((row["count"], row["reasons"], row["port"]), (3, {"no-login": 3}, 8002))
+        self.assertEqual(next(x for x in r["rows"] if x["ip"] == "203.0.113.9")["rule"], "block")
+        # van hanh mac dinh khong duoc chan / cho phep IP
+        pw = "P-" + secrets.token_hex(8)
+        req(self.port, "POST", "/api/users", {"name": "nv2", "password": pw, "role": "operator", "must_change": ""}, self.ck)
+        ck = {"Cookie": req(self.port, "POST", "/api/login", {"user": "nv2", "password": pw})[1]["Set-Cookie"].split(";")[0]}
+        self.assertEqual(req(self.port, "POST", "/api/iprules", {"site": "hcm", "cidr": "192.0.2.1", "action": "block"}, ck)[0], 403)
+        self.assertEqual(req(self.port, "GET", "/api/blocked", None, ck)[0], 200)
+        self.assertEqual(req(self.port, "DELETE", f"/api/iprules/{blk['id']}", None, ck)[0], 403)
+        req(self.port, "DELETE", "/api/users/nv2", None, self.ck)
+        for x in (blk, alw):
+            self.assertEqual(req(self.port, "DELETE", f"/api/iprules/{x['id']}", None, self.ck)[0], 200)
+        self.assertEqual(self.sync()[2]["ip_rules"], [])
+
     def test_fine_permissions(self):
         # Van hanh chi duoc sua BMC + xuat CSV o site hcm: them / xoa / ap dung / xem nhat ky -> 403
         pw = "P-" + secrets.token_hex(8)

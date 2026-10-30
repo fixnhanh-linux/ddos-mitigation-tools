@@ -2,6 +2,7 @@
 
 import copy
 import http.server
+import ipaddress
 import json
 import re
 import socketserver
@@ -51,6 +52,8 @@ class AuthGateway:
         self.maint = []         # lich bao tri dang dien ra (web gui xuong)
         self.access = []        # lan mo BMC chua gui ve web
         self.seen = {}          # (cong, ip, nguoi, loai) -> lan cuoi thay
+        self.ip_rules = []      # chan / cho phep IP (web gui xuong moi lan sync): [(mang, "block"|"allow", cong, han, ghi chu)]
+        self.denied = {}        # (cong, ip, ly do) -> {count, first, last, path}: lan bi chan chua gui ve web
 
     def _settings(self):
         rel = self.get_release() or {}
@@ -130,6 +133,72 @@ class AuthGateway:
         with self.lock:
             self.guests = g
 
+    def set_ip_rules(self, items):
+        out = []
+        for x in items or []:
+            try:
+                act = str(x["action"])
+                if act not in ("block", "allow"):
+                    continue
+                out.append((ipaddress.ip_network(str(x["cidr"]), strict=False), act, int(x.get("port") or 0),
+                            float(x.get("exp") or 0), str(x.get("note", ""))[:60]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        with self.lock:
+            self.ip_rules = out
+
+    def ip_rule(self, port, ip):
+        """Quy tac khop IP + cong: chan uu tien hon cho phep. Tra ve (hanh dong, ghi chu) hoac None."""
+        try:
+            addr = ipaddress.ip_address(ip.strip())
+        except ValueError:
+            return None
+        now = time.time()
+        with self.lock:
+            rules = [r for r in self.ip_rules if (not r[2] or r[2] == port) and (not r[3] or r[3] > now)
+                     and addr.version == r[0].version and addr in r[0]]
+        for act in ("block", "allow"):
+            for r in rules:
+                if r[1] == act:
+                    return act, r[4]
+        return None
+
+    def note_denied(self, port, ip, reason, uri=""):
+        """Gom lan bi chan theo (cong, IP, ly do) -> gui ve web o lan sync sau."""
+        key = (port, (ip or "")[:64], reason)
+        now = now_iso()
+        with self.lock:
+            d = self.denied.get(key)
+            if d is None:
+                if len(self.denied) >= 3000:
+                    return
+                d = self.denied[key] = {"count": 0, "first": now, "path": ""}
+            d["count"] += 1
+            d["last"] = now
+            if uri and not d["path"]:
+                d["path"] = uri[:160]
+
+    def pop_denied(self):
+        with self.lock:
+            out, self.denied = self.denied, {}
+        return [{"port": k[0], "ip": k[1], "reason": k[2], **v} for k, v in out.items()]
+
+    def requeue_denied(self, items):
+        with self.lock:
+            for x in items:
+                key = (x["port"], x["ip"], x["reason"])
+                d = self.denied.get(key)
+                if d:
+                    d["count"] += x["count"]
+                    d["first"] = min(d["first"], x["first"])
+                elif len(self.denied) < 3000:
+                    self.denied[key] = {k: x[k] for k in ("count", "first", "last", "path")}
+
+    def _deny(self, port, ip, reason, uri, code):
+        self._count(port, "deny")
+        self.note_denied(port, ip, reason, uri)
+        return code, {}
+
     def set_maint(self, items):
         out = []
         for x in items or []:
@@ -184,16 +253,21 @@ class AuthGateway:
         """Tra ve (ma HTTP cho Traefik, header them vao request toi BMC)."""
         bmc = self._bmc(port)
         if not bmc or not bmc.get("enabled", True):
-            self._count(port, "deny")
-            return 403, {}
+            return self._deny(port, ip, "disabled", uri, 403)
+        rule = self.ip_rule(port, ip) if ip else None
+        if rule and rule[0] == "block":  # IP bi chan: ke ca da dang nhap / co link khach
+            return self._deny(port, ip, "blocked", uri, 403)
+        if rule and rule[0] == "allow":  # IP duoc phep (van phong / NOC): vao khong can dang nhap
+            self._count(port, "ok")
+            self.log_access(port, ip, f"IP cho phép{': ' + rule[1] if rule[1] else ''}", uri)
+            return 200, {"Token-ip-allow": "true"}
         g = self.guest(port, guest_token)
         if g:  # link tam cho khach (web cap, co han, thu hoi duoc)
             self._count(port, "ok")
             self.log_access(port, ip, f"khách: {g['label'] or g['id']}", uri)
             return 200, {"Token-guest": "true"}
         if not cookie:
-            self._count(port, "deny")
-            return 401, {}
+            return self._deny(port, ip, "no-login", uri, 401)
         try:
             status, payload = self.lookup(cookie)
         except (OSError, ValueError) as e:
@@ -204,12 +278,10 @@ class AuthGateway:
             self._count(port, "error")
             return 401, {}
         if payload.get("active") is not True:
-            self._count(port, "deny")
-            return 403, {}
+            return self._deny(port, ip, "session", uri, 403)
         expected = bmc.get("expected_target")
         if expected and str(payload.get("target")) != expected:
-            self._count(port, "deny")
-            return 403, {}
+            return self._deny(port, ip, "target", uri, 403)
         headers = {}
         for k, v in payload.items():
             if v is None or isinstance(v, (dict, list)) or not RE_HEADER_NAME.match(str(k)):

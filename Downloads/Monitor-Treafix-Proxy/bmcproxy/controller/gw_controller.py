@@ -295,9 +295,19 @@ def agent_pkg_info():
     return info
 
 
+DENY_REASONS = ("no-login", "session", "target", "disabled", "blocked")
+
+
+def ip_in(ip, cidr):
+    try:
+        return ipaddress.ip_address(ip) in ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return False
+
+
 class Store:
     FILES = ("bmc.json", "settings.json", "sites.json", "users.json", "state.json", "templates.json", "auth.json",
-             "notify.json", "guests.json", "maint.json")
+             "notify.json", "guests.json", "maint.json", "iprules.json")
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -414,6 +424,7 @@ class Store:
         self.notify = docs.get("notify.json", {})  # canh bao Telegram / email
         self.guests = docs.get("guests.json", {})  # link tam cho khach: id -> {...}
         self.maint = docs.get("maint.json", {})    # lich bao tri: id -> {site, port (0 = ca site), start, end, note}
+        self.iprules = docs.get("iprules.json", {})  # chan / cho phep IP: id -> {site, port (0 = ca site), cidr, action, exp, note}
 
     def _p(self, *name):
         return os.path.join(self.dir, *name)
@@ -444,6 +455,7 @@ class Store:
             self.notify = read_json(self._p("notify.json"), {})
             self.guests = read_json(self._p("guests.json"), {})
             self.maint = read_json(self._p("maint.json"), {})
+            self.iprules = read_json(self._p("iprules.json"), {})
             self.mtimes = cur
 
     def _refresh_db(self):
@@ -492,7 +504,8 @@ class Store:
                 "auth.json": lambda: self.auth,
                 "notify.json": lambda: self.notify,
                 "guests.json": lambda: self.guests,
-                "maint.json": lambda: self.maint}[name]()
+                "maint.json": lambda: self.maint,
+                "iprules.json": lambda: self.iprules}[name]()
         write_json(self._p(name), data, 0o600 if name in ("users.json", "sites.json", "auth.json", "notify.json", "guests.json") else 0o644)
         self.mtimes[name] = self._mtime(name)
         if self.db:
@@ -547,6 +560,27 @@ class Store:
                 if len(out) >= limit:
                     break
         return out
+
+    # ------------------------------------------------------------ lan bi chan (agent gom theo IP + cong + ly do)
+    def denied_add(self, site, items):
+        rows = []
+        for x in (items or [])[:3000]:
+            if not isinstance(x, dict):
+                continue
+            try:
+                port, count = int(x.get("port")), max(1, int(x.get("count") or 1))
+            except (TypeError, ValueError):
+                continue
+            reason = str(x.get("reason", ""))
+            rows.append({"ts": str(x.get("last", ""))[:32] or now_iso(), "first": str(x.get("first", ""))[:32],
+                         "site": site, "port": port, "ip": str(x.get("ip", ""))[:64], "count": count,
+                         "reason": reason if reason in DENY_REASONS else "other", "path": str(x.get("path", ""))[:160]})
+        if rows:
+            self.append_log("denied.log", rows)
+
+    def read_denied(self, limit=20000, site="", days=7):
+        since = (dt.datetime.now() - dt.timedelta(days=days)).isoformat()
+        return self.read_log("denied.log", limit, lambda r: r.get("ts", "") >= since and (not site or r.get("site") == site))
 
     # ------------------------------------------------------------ lan mo BMC / console (agent gui ve)
     def access_add(self, site, items):
@@ -938,6 +972,20 @@ class App:
         return out
 
     # ------------------------------------------------------------ link tam cho khach
+    def site_ip_rules(self, site):
+        """Quy tac chan / cho phep IP con han cua site -> gui xuong agent."""
+        now = time.time()
+        return [{"cidr": r["cidr"], "action": r["action"], "port": r.get("port", 0), "exp": r.get("exp", 0),
+                 "note": r.get("note", "")} for r in self.store.iprules.values()
+                if r["site"] == site and (not r.get("exp") or r["exp"] > now)]
+
+    @staticmethod
+    def iprule_view(rid, r):
+        exp = r.get("exp") or 0
+        return {"id": rid, **{k: r.get(k) for k in ("site", "port", "cidr", "action", "note", "created_by", "created_at")},
+                "exp": exp, "expires": dt.datetime.fromtimestamp(exp).isoformat(timespec="minutes") if exp else "",
+                "status": "expired" if exp and exp <= time.time() else "active"}
+
     def site_guests(self, site):
         """Link khach con han cua site -> gui xuong agent (chi ban bam cua ma)."""
         now = time.time()
@@ -1502,6 +1550,8 @@ def make_handler(app):
                         app.extra.setdefault(site, {})[k] = data.pop(k)
                 if isinstance(data.get("access"), list):
                     st.access_add(site, data.pop("access"))
+                if isinstance(data.get("denied"), list):
+                    st.denied_add(site, data.pop("denied"))
                 was_online = app.online(site)
                 app.hb[site] = data
                 if not was_online:
@@ -1510,7 +1560,7 @@ def make_handler(app):
                     cmds = app.commands.pop(site, [])
                     target = (st.state.get(site) or {}).get("target")
                 resp = {"target": target, "commands": cmds, "server_time": now_iso(), "guests": app.site_guests(site),
-                        "maint": app.site_maint(site)}
+                        "maint": app.site_maint(site), "ip_rules": app.site_ip_rules(site)}
                 att = data.get("attempt") or {}
                 # Agent da ap dung nhung goi /report bi mat (mang chap chon): lay ket qua tu heartbeat
                 if target and (att.get("rev"), att.get("attempt")) == (target["rev"], target["attempt"]):
@@ -1766,6 +1816,97 @@ def make_handler(app):
                 return self.send(200, {"ok": True})
             return self.err(404, "Không tìm thấy API")
 
+        def blocked_view(self, u):
+            """Lan bi chan gom theo (site, cong, IP): tong so lan, ly do, lan dau / cuoi."""
+            app.need(u, "stats")
+            site = (self.query.get("site") or [""])[0]
+            try:
+                days = max(1, min(30, int((self.query.get("days") or ["7"])[0])))
+            except ValueError:
+                days = 7
+            agg = {}
+            for r in st.read_denied(site=site, days=days):
+                if not app.can(u, "stats", r.get("site", "")):
+                    continue
+                k = (r["site"], r["port"], r["ip"])
+                a = agg.setdefault(k, {"site": r["site"], "port": r["port"], "ip": r["ip"], "count": 0, "reasons": {},
+                                       "first": r.get("first") or r["ts"], "last": r["ts"], "path": r.get("path", "")})
+                a["count"] += r["count"]
+                a["reasons"][r["reason"]] = a["reasons"].get(r["reason"], 0) + r["count"]
+                a["first"] = min(a["first"], r.get("first") or r["ts"])
+                a["last"] = max(a["last"], r["ts"])
+            notes = {bmc_key(b): b.get("note", "") for b in st.bmcs}
+            rows = sorted(agg.values(), key=lambda a: (-a["count"], a["last"]))[:1000]
+            for a in rows:
+                a["note"] = notes.get((a["site"], a["port"]), "")
+                a["rule"] = next((app.iprule_view(i, x)["action"] for i, x in st.iprules.items() if x["site"] == a["site"]
+                                  and (not x.get("port") or x["port"] == a["port"]) and ip_in(a["ip"], x["cidr"])
+                                  and (not x.get("exp") or x["exp"] > time.time())), "")
+            by_ip = {}
+            for a in rows:
+                by_ip[a["ip"]] = by_ip.get(a["ip"], 0) + a["count"]
+            return {"rows": rows, "days": days, "total": sum(a["count"] for a in rows), "ips": len(by_ip),
+                    "top_ips": sorted(by_ip.items(), key=lambda x: -x[1])[:10]}
+
+        def api_iprules(self, method, rid, u):
+            if method == "GET" and rid is None:
+                rows = [app.iprule_view(i, r) for i, r in st.iprules.items() if app.can_view(u, r["site"])]
+                return self.send(200, sorted(rows, key=lambda r: (r["status"] != "active", r["site"], r["action"], r["cidr"])))
+            if method == "POST" and rid is None:
+                data = self.body_json(10_000)
+                site = str(data.get("site", ""))
+                if site not in st.sites:
+                    raise ValidationError("Chọn site")
+                app.need(u, "iprules", site)
+                action = str(data.get("action", ""))
+                if action not in ("block", "allow"):
+                    raise ValidationError("Chọn chặn hoặc cho phép")
+                try:
+                    net = ipaddress.ip_network(str(data.get("cidr", "")).strip(), strict=False)
+                except ValueError:
+                    raise ValidationError("IP / dải IP không hợp lệ (vd 1.2.3.4 hoặc 1.2.3.0/24)")
+                if action == "allow" and net.prefixlen < (16 if net.version == 4 else 48):
+                    raise ValidationError("Cho phép tối đa dải /16 (IPv6 /48): dải rộng hơn = mở BMC cho quá nhiều người")
+                if action == "block" and net.prefixlen < (8 if net.version == 4 else 32):
+                    raise ValidationError("Chặn tối đa dải /8 (IPv6 /32)")
+                port = int(data.get("port") or 0)
+                if port and not st.get_bmc(site, port):
+                    raise ValidationError(f"Site {site} không có BMC cổng {port}")
+                try:
+                    hours = float(data.get("hours") or 0)
+                except (TypeError, ValueError):
+                    raise ValidationError("Thời hạn là số giờ")
+                if hours < 0 or hours > 24 * 365:
+                    raise ValidationError("Thời hạn tối đa 1 năm (0 = không hạn)")
+                rid = secrets.token_hex(5)
+                rec = {"site": site, "port": port, "cidr": str(net), "action": action,
+                       "exp": time.time() + hours * 3600 if hours else 0, "note": clean_text(data.get("note", ""), 60),
+                       "created_by": u["name"], "created_at": now_iso()}
+                with st.lock:
+                    dup = [i for i, r in st.iprules.items() if (r["site"], r.get("port", 0), r["cidr"]) == (site, port, rec["cidr"])]
+                    for i in dup:  # cung IP + pham vi: thay quy tac cu
+                        del st.iprules[i]
+                    cutoff = time.time() - 30 * 86400
+                    for old in [i for i, r in st.iprules.items() if r.get("exp") and r["exp"] < cutoff]:
+                        del st.iprules[old]
+                    st.iprules[rid] = rec
+                    st.save("iprules.json")
+                st.audit(u["name"], f"ip-{action}", f"{rec['cidr']} {'cổng ' + str(port) if port else 'cả site'}"
+                         + (f", {hours:g} giờ" if hours else "") + (f" · {rec['note']}" if rec["note"] else ""), site)
+                return self.send(201, {**app.iprule_view(rid, rec), "site_online": app.online(site)})
+            if method == "DELETE" and rid:
+                r = st.iprules.get(rid)
+                if not r:
+                    return self.err(404, "Không có quy tắc này")
+                app.need(u, "iprules", r["site"])
+                with st.lock:
+                    del st.iprules[rid]
+                    st.save("iprules.json")
+                st.audit(u["name"], "ip-rule-delete", f"{'chặn' if r['action'] == 'block' else 'cho phép'} {r['cidr']}"
+                         + (f" cổng {r['port']}" if r.get("port") else ""), r["site"])
+                return self.send(200, {"ok": True})
+            return self.err(404, "Không tìm thấy API")
+
         def api_guests(self, method, gid, u):
             if method == "GET" and gid is None:
                 rows = [app.guest_view(i, g) for i, g in st.guests.items() if app.can_view(u, g["site"])]
@@ -1961,6 +2102,10 @@ def make_handler(app):
                 return self.api_ldap(method, a1, u)
             if res == "guests":
                 return self.api_guests(method, a1, u)
+            if res == "blocked" and method == "GET":
+                return self.send(200, self.blocked_view(u))
+            if res == "iprules":
+                return self.api_iprules(method, a1, u)
             if res == "stats" and method == "GET":
                 app.need(u, "stats")
                 return self.send(200, app.stats(u))

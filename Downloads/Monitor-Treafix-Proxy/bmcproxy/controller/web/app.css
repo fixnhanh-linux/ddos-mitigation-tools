@@ -925,3 +925,11 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
 .user-tools select { flex: 0 0 auto; }
 .kbd-hint { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-left: 6px; }
 
+/* ---------- trang Chan IP ---------- */
+#iprule-panel .panel-head { flex-wrap: wrap; gap: 6px 12px; }
+#iprule-panel .panel-head .hint { flex: 1 1 320px; }
+#iprule-panel tr.off td { opacity: .55; }
+.blocked-kpis { margin-bottom: 12px; }
+.blocked-kpis .num { font-size: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kpi .foot a { color: inherit; text-decoration: underline dotted; }
+

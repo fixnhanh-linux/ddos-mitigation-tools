@@ -1289,3 +1289,37 @@ Tài khoản khách hàng chỉ thấy **BMC** và **Cài đặt**.
 Link `app.js` / `app.css` có gắn mã nội dung (`app.js?v=…`) nên trình duyệt tự tải bản mới khi mở lại trang. Tab đang mở
 sẵn thấy thanh **"Web vừa được cập nhật bản mới · Tải lại"** (không tự tải lại để khỏi mất form đang nhập).
 
+
+## 34. Chặn IP: lượt bị chặn, chặn / cho phép IP
+
+### 34.1. "Bị chặn" là gì
+
+Mỗi request tới cổng BMC trên proxy đều được agent (forwardAuth của Traefik) kiểm tra. Bị từ chối khi:
+
+| Lý do | Nghĩa |
+|---|---|
+| chưa đăng nhập | không có cookie đăng nhập web (đa số; IP lạ thường là bot quét cổng) |
+| phiên hết hạn / bị khoá | cookie cũ, tài khoản bị khoá / đăng xuất |
+| sai target | BMC có "Target bắt buộc" khác target của người dùng |
+| BMC đang tắt | BMC tạm tắt trên web |
+| IP bị chặn | IP nằm trong quy tắc chặn bên dưới |
+
+Số trên thẻ **Lượt xác thực** ở Tổng quan đếm từ lúc agent khởi động lại, theo từng request (1 lần mở trang = nhiều request).
+
+### 34.2. Trang Chặn IP
+
+Menu **Chặn IP** (cần quyền "xem thống kê"): lượt bị chặn 24 giờ / 7 / 30 ngày gom theo IP + BMC, lý do, số lần, lần cuối;
+thẻ IP bị chặn nhiều nhất. Agent gửi về mỗi lần đồng bộ (~10 giây), lưu ở `data/denied.log`.
+
+### 34.3. Quy tắc chặn / cho phép IP
+
+Bấm **Chặn IP** / **Cho phép** ngay trên dòng bị chặn, hoặc **+ Thêm quy tắc**. Mỗi quy tắc: IP hoặc dải (`1.2.3.4`, `1.2.3.0/24`),
+site, một BMC hoặc mọi BMC của site, thời hạn (1 giờ … không hạn), ghi chú.
+
+- **Chặn**: IP không mở được BMC dù đã đăng nhập hay có link khách. Chặn tối đa dải /8.
+- **Cho phép**: IP vào thẳng trang đăng nhập BMC **không cần đăng nhập web** (thay cho tắt "Bắt xác thực" cả BMC).
+  Chỉ dùng cho IP tĩnh tin cậy (văn phòng, NOC), nên đặt thời hạn; tối đa dải /16. Lượt vào ghi ở trang Truy cập là "IP cho phép".
+- Chặn ưu tiên hơn cho phép. Agent nhận quy tắc trong ~10 giây, **không cần Áp dụng**. Quy tắc hết hạn tự bỏ.
+- Quyền **chặn / cho phép IP** mặc định chỉ Quản trị có; Vận hành cần tick thêm ở Người dùng → Quyền chi tiết.
+- IP là địa chỉ Traefik nhìn thấy. Site đứng sau proxy khác (nginx, Cloudflare…) thì đó là IP của proxy đó - đừng cho phép IP proxy.
+- Cần agent bản mới: Site → **Cập nhật agent**.
