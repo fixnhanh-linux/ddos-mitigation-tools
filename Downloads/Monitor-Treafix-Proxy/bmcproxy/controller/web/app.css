@@ -1017,4 +1017,6 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
 .ipinfo h3 { font-size: 14px; margin: 16px 0 6px; }
 .stats-block .ov-wide { grid-column: 1 / -1; }
 @media (max-width: 640px) { .ipinfo-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+#shield-panel .panel-head { flex-wrap: wrap; gap: 6px 12px; }
+#shield-panel .panel-head .hint { flex: 1 1 320px; }
 

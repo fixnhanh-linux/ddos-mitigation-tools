@@ -30,6 +30,7 @@ from gw_common import (BMC_DEFAULTS, BUILD, no_accent, bmc_ports, parse_tcp_port
                        SETTINGS_DEFAULTS, VERSION, GUEST_PATH, ValidationError, cert_info, check_password, totp_check, totp_new_secret, totp_uri,
                        clean_text, hash_password, hash_token, now_iso, read_json, to_port,
                        validate_bmc_fields, validate_settings_values, write_json)
+from gw_shield import SECURITY_DEFAULTS, WAF_LABEL, security_rev
 from gw_templates import (BUILTIN_TEMPLATES, RE_IPHOST, all_templates, apply_template, export_csv, parse_rows,
                           row_to_bmc, validate_template)
 from gw_render import DEFAULT_PARAMS, release_rev, render_bmc, render_files
@@ -298,7 +299,46 @@ def agent_pkg_info():
     return info
 
 
-DENY_REASONS = ("no-login", "session", "target", "disabled", "blocked")
+DENY_REASONS = ("no-login", "session", "target", "disabled", "blocked", "geo", "waf", "waf-log", "bruteforce")
+
+
+def clean_security(data, cur=None):
+    """Kiem tra cau hinh bao ve 1 site (WAF / quoc gia / chong do mat khau)."""
+    out = json.loads(json.dumps(cur or SECURITY_DEFAULTS))
+    for part in ("geo", "brute", "waf"):
+        out.setdefault(part, dict(SECURITY_DEFAULTS[part]))
+    g = data.get("geo")
+    if isinstance(g, dict):
+        mode = str(g.get("mode", out["geo"]["mode"]))
+        if mode not in ("any", "allow", "deny"):
+            raise ValidationError("Quốc gia: chọn mọi nơi / chỉ cho phép / chặn")
+        raw = g.get("countries", out["geo"]["countries"])
+        codes = re.split(r"[\s,;]+", raw) if isinstance(raw, str) else list(raw or [])
+        codes = sorted({str(c).strip().upper() for c in codes if str(c).strip()})
+        bad = [c for c in codes if not re.fullmatch(r"[A-Z]{2}", c)]
+        if bad:
+            raise ValidationError(f"Mã nước 2 chữ (VN, SG, US...): {', '.join(bad[:5])}")
+        if mode != "any" and not codes:
+            raise ValidationError("Chọn ít nhất 1 nước (vd VN)")
+        out["geo"] = {"mode": mode, "countries": codes}
+    b = data.get("brute")
+    if isinstance(b, dict):
+        try:
+            lim, win, ban = int(b.get("limit", out["brute"]["limit"])), int(b.get("window", out["brute"]["window"])), \
+                int(b.get("ban", out["brute"]["ban"]))
+        except (TypeError, ValueError):
+            raise ValidationError("Chống dò mật khẩu: nhập số")
+        if not (3 <= lim <= 200 and 60 <= win <= 86400 and 60 <= ban <= 30 * 86400):
+            raise ValidationError("Chống dò mật khẩu: 3-200 lần, khung 1 phút - 1 ngày, chặn 1 phút - 30 ngày")
+        out["brute"] = {"enabled": str(b.get("enabled", out["brute"]["enabled"])).lower() in ("1", "true", "on", "yes"),
+                        "limit": lim, "window": win, "ban": ban}
+    w = data.get("waf")
+    if isinstance(w, dict):
+        mode = str(w.get("mode", out["waf"]["mode"]))
+        if mode not in ("off", "log", "block"):
+            raise ValidationError("WAF: tắt / chỉ ghi / chặn")
+        out["waf"] = {"mode": mode, "scanner": str(w.get("scanner", out["waf"]["scanner"])).lower() in ("1", "true", "on", "yes")}
+    return out
 
 
 def ip_in(ip, cidr):
@@ -1108,6 +1148,49 @@ class App:
         metric("geoip_ready", "gauge", "Da nap du lieu GeoIP (1/0)", [({}, int(g["ready"]))])
         return "\n".join(lines) + "\n"
 
+    def site_security(self, site):
+        """Cau hinh bao ve gui agent: WAF, chong do mat khau, loc quoc gia (kem dai IP tu GeoIP)."""
+        cfg = clean_security({}, self.store.sites[site].get("security"))
+        geo = dict(cfg["geo"])
+        ranges = self.geo.ranges(geo["countries"]) if geo["mode"] != "any" else None
+        if geo["mode"] != "any" and ranges is None:
+            geo = {"mode": "any", "countries": geo["countries"], "pending": True}  # chua co GeoIP: khong chan theo nuoc
+        out = {**cfg, "geo": {**geo, **({"v4": ranges["v4"], "v6": ranges["v6"]} if ranges else {})}}
+        out["rev"] = security_rev(cfg, ranges["id"] if ranges else ("pending" if geo.get("pending") else ""))
+        return out
+
+    def autoban_add(self, site, events):
+        """Agent tu chan IP do mat khau -> quy tac chan tren web (thay / go duoc o trang Chan IP)."""
+        st = self.store
+        made = []
+        now = time.time()
+        with st.lock:
+            for ev in (events or [])[:100]:
+                if not isinstance(ev, dict):
+                    continue
+                ip = str(ev.get("ip", ""))[:64]
+                try:
+                    net = str(ipaddress.ip_network(ip, strict=False))
+                    until = float(ev.get("until") or 0)
+                except (ValueError, TypeError):
+                    continue
+                if until <= now:
+                    continue
+                if any(r["site"] == site and r["cidr"] == net and r["action"] == "block" and (not r.get("exp") or r["exp"] >= until)
+                       for r in st.iprules.values()):
+                    continue
+                st.iprules[secrets.token_hex(5)] = {
+                    "site": site, "port": 0, "cidr": net, "action": "block", "exp": until, "auto": True,
+                    "note": clean_text(f"tự chặn: dò mật khẩu - {ev.get('detail', '')}", 60),
+                    "created_by": "tự động", "created_at": now_iso()}
+                made.append((net, str(ev.get("detail", ""))))
+            if made:
+                st.save("iprules.json")
+        for net, detail in made:
+            st.audit("agent", "ip-autoban", f"{net} · {detail}", site)
+            self.notifier.event("autoban", f"🛡 Tự chặn IP {net} ở site {st.sites[site]['label']}", f"Dò mật khẩu BMC: {detail}")
+        return len(made)
+
     def site_ip_rules(self, site):
         """Quy tac chan / cho phep IP con han cua site -> gui xuong agent."""
         now = time.time()
@@ -1118,7 +1201,7 @@ class App:
     @staticmethod
     def iprule_view(rid, r):
         exp = r.get("exp") or 0
-        return {"id": rid, **{k: r.get(k) for k in ("site", "port", "cidr", "action", "note", "created_by", "created_at")},
+        return {"id": rid, **{k: r.get(k) for k in ("site", "port", "cidr", "action", "note", "created_by", "created_at", "auto")},
                 "exp": exp, "expires": dt.datetime.fromtimestamp(exp).isoformat(timespec="minutes") if exp else "",
                 "status": "expired" if exp and exp <= time.time() else "active"}
 
@@ -1690,6 +1773,8 @@ def make_handler(app):
                     st.access_add(site, data.pop("access"))
                 if isinstance(data.get("denied"), list):
                     st.denied_add(site, data.pop("denied"))
+                if isinstance(data.get("autoban"), list):
+                    app.autoban_add(site, data.pop("autoban"))
                 was_online = app.online(site)
                 app.hb[site] = data
                 if not was_online:
@@ -1699,6 +1784,9 @@ def make_handler(app):
                     target = (st.state.get(site) or {}).get("target")
                 resp = {"target": target, "commands": cmds, "server_time": now_iso(), "guests": app.site_guests(site),
                         "maint": app.site_maint(site), "ip_rules": app.site_ip_rules(site)}
+                sec = app.site_security(site)
+                if data.get("security_rev") != sec["rev"]:  # chi gui khi doi (dai IP theo nuoc co the lon)
+                    resp["security"] = sec
                 att = data.get("attempt") or {}
                 # Agent da ap dung nhung goi /report bi mat (mang chap chon): lay ket qua tu heartbeat
                 if target and (att.get("rev"), att.get("attempt")) == (target["rev"], target["attempt"]):
@@ -1986,6 +2074,38 @@ def make_handler(app):
                 by_ip[a["ip"]] = by_ip.get(a["ip"], 0) + a["count"]
             return {"rows": rows, "days": days, "total": sum(a["count"] for a in rows), "ips": len(by_ip),
                     "top_ips": sorted(by_ip.items(), key=lambda x: -x[1])[:10]}
+
+        def api_security(self, method, u):
+            """Bao ve theo site: GET danh sach, PUT {sites: [...], geo, brute, waf} (quyen chan / cho phep IP)."""
+            if method == "GET":
+                app.need(u, "stats")
+                gs = app.geo.status()
+                rows = []
+                for k in app.visible_sites(u):
+                    cfg = clean_security({}, st.sites[k].get("security"))
+                    applied = ((app.hb.get(k) or {}).get("security_rev") == app.site_security(k)["rev"])
+                    rows.append({"site": k, "label": st.sites[k]["label"], **cfg, "applied": applied,
+                                 "online": app.online(k), "can_edit": app.can(u, "iprules", k)})
+                return self.send(200, {"sites": rows, "geoip_ready": gs["ready"], "waf_rules": WAF_LABEL,
+                                       "defaults": SECURITY_DEFAULTS})
+            if method == "PUT":
+                data = self.body_json(10_000)
+                sites = [s for s in data.get("sites") or [] if s in st.sites]
+                if not sites:
+                    raise ValidationError("Chọn site")
+                for k in sites:
+                    app.need(u, "iprules", k)
+                with st.lock:
+                    for k in sites:
+                        st.sites[k]["security"] = clean_security(data, st.sites[k].get("security"))
+                    st.save("sites.json")
+                cfg = st.sites[sites[0]]["security"]
+                geo = cfg["geo"]
+                for k in sites:
+                    st.audit(u["name"], "security", f"quốc gia: {geo['mode']} {','.join(geo['countries'])} · WAF {cfg['waf']['mode']} · "
+                             f"dò mật khẩu {'bật' if cfg['brute']['enabled'] else 'tắt'} ({cfg['brute']['limit']}/{cfg['brute']['window'] // 60} phút)", k)
+                return self.send(200, {"ok": True, "geoip_ready": app.geo.status()["ready"]})
+            return self.err(405, "Không hỗ trợ")
 
         def api_iprules(self, method, rid, u):
             if method == "GET" and rid is None:
@@ -2296,6 +2416,8 @@ def make_handler(app):
                 return self.send(200, self.blocked_view(u))
             if res == "iprules":
                 return self.api_iprules(method, a1, u)
+            if res == "security":
+                return self.api_security(method, u)
             if res == "stats" and method == "GET":
                 app.need(u, "stats")
                 return self.send(200, app.stats(u, (self.query.get("range") or ["7d"])[0]))

@@ -346,11 +346,16 @@ class Agent:
         denied = self.gateway.pop_denied()  # lan bi chan (gom theo IP + cong + ly do)
         if denied:
             hb["denied"] = denied
+        autoban = self.gateway.shield.pop_events()  # IP tu chan vi do mat khau -> web tao quy tac chan
+        if autoban:
+            hb["autoban"] = autoban
+        hb["security_rev"] = self.gateway.shield.rev
         try:
             status, resp = self.call("POST", "sync", hb)
         except OSError as e:
             self.gateway.requeue_access(access)
             self.gateway.requeue_denied(denied)
+            self.gateway.shield.requeue_events(autoban)
             if self.controller_ok is not False:
                 log(f"không kết nối được controller: {e}")
             self.controller_ok = False
@@ -358,6 +363,7 @@ class Agent:
         if status != 200 or not isinstance(resp, dict):
             self.gateway.requeue_access(access)
             self.gateway.requeue_denied(denied)
+            self.gateway.shield.requeue_events(autoban)
             log(f"controller trả lỗi {status}: {resp}")
             self.controller_ok = False
             return
@@ -367,6 +373,9 @@ class Agent:
             self.gateway.set_maint(resp["maint"])
         if "ip_rules" in resp:
             self.gateway.set_ip_rules(resp["ip_rules"])
+        if isinstance(resp.get("security"), dict):  # chi gui khi cau hinh bao ve doi (security_rev khac)
+            self.gateway.shield.set_config(resp["security"])
+            log(f"đã nhận cấu hình bảo vệ {resp['security'].get('rev', '')}")
         if self.controller_ok is not True:
             log("đã kết nối controller")
         self.controller_ok = True

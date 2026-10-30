@@ -169,6 +169,33 @@ class GeoIP:
                 time.sleep(6 * 3600)
         threading.Thread(target=run, name="geoip", daemon=True).start()
 
+    def ranges(self, codes):
+        """Cac dai IP (khoa 64-bit nhu _Table) cua cac nuoc -> gui agent loc quoc gia. Gop dai lien nhau."""
+        codes = sorted({c.upper() for c in codes})
+        with self.lock:
+            tbl, date = self.country, (self.info["country"] or {}).get("date", "")
+        if not tbl or not codes:
+            return None
+        key = (tuple(codes), date)
+        hit = getattr(self, "_ranges_cache", None)
+        if hit and hit[0] == key:
+            return hit[1]
+        want = set(codes)
+        out = {}
+        for name, s, e, v in (("v4", tbl.v4s, tbl.v4e, tbl.v4v), ("v6", tbl.v6s, tbl.v6e, tbl.v6v)):
+            merged = []
+            for i, cc in enumerate(v):
+                if cc in want:
+                    a, b = s[i], e[i]
+                    if merged and a <= merged[-1][1] + 1:
+                        merged[-1][1] = max(merged[-1][1], b)
+                    else:
+                        merged.append([a, b])
+            out[name] = merged
+        out["id"] = f"{','.join(codes)}@{date}"
+        self._ranges_cache = (key, out)
+        return out
+
     def status(self):
         with self.lock:
             return {"ready": bool(self.country), "country": self.info["country"], "asn": self.info["asn"],

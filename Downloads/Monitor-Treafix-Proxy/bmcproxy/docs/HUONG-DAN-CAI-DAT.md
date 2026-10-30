@@ -1367,3 +1367,43 @@ Metric chính (tiền tố `bmcproxy_`):
 | `ip_rules{action}`, `guest_links_active`, `sessions_active`, `geoip_ready` | quy tắc IP, link khách, phiên web, GeoIP |
 
 Quản trị đang đăng nhập web cũng mở được `/api/metrics` trên trình duyệt để xem thử.
+
+## 36. Bảo vệ theo site: WAF, giới hạn quốc gia, chống dò mật khẩu
+
+Trang **Chặn IP → Bảo vệ theo site → Cài đặt bảo vệ** (cần quyền chặn / cho phép IP). Chọn 1 hoặc nhiều site, lưu là agent
+nhận trong ~10 giây, **không cần Áp dụng**. Cột **Agent** = "đã nhận" khi agent đang chạy đúng cấu hình; "chưa nhận" = agent cũ
+(Site → **Cập nhật agent**). Áp cho mọi BMC của site, kể cả BMC tắt "Bắt xác thực".
+
+Thứ tự kiểm tra mỗi request: IP bị chặn → IP được phép (bỏ qua mọi lớp dưới) → IP đang bị tự chặn → WAF → quốc gia → đếm đăng nhập
+→ đăng nhập web / link khách.
+
+### 36.1. Giới hạn quốc gia
+
+| Chọn | Nghĩa |
+|---|---|
+| Mọi nơi (quốc tế) | mặc định, không giới hạn |
+| Chỉ các nước dưới đây | vd `VN`: chỉ IP Việt Nam vào được |
+| Mọi nơi trừ các nước dưới đây | vd `CN, RU`: chặn các nước này |
+
+- Theo dữ liệu GeoIP (mục 35). Chưa có dữ liệu GeoIP thì **tạm không chặn theo nước** (trang báo đỏ).
+- IP mạng nội bộ và IP trong quy tắc **Cho phép** luôn được vào. Người đi công tác nước ngoài: thêm IP của họ vào **Cho phép** có thời hạn.
+- VPN / Cloudflare WARP hiện nước của nhà cung cấp VPN (vd 104.28.x.x = Cloudflare), có thể bị chặn khi chọn "Chỉ Việt Nam".
+
+### 36.2. WAF - bộ luật dựng sẵn
+
+Rút gọn từ OWASP CRS (ModSecurity), kiểm tra đường dẫn + tham số (giải mã 2 lần), User-Agent, Cookie / Referer:
+path traversal (`../`), đọc file hệ thống (`/etc/passwd`), SQL injection, XSS, chèn lệnh (`;wget`, `$(…)`), Shellshock,
+đường dẫn dò quét (`wp-admin`, `.env`, `.git/`, phpMyAdmin, actuator…), công cụ quét (sqlmap, nikto, nmap, masscan, nuclei…).
+
+Chế độ: **Chặn** (khuyên dùng) / **Chỉ ghi lại** (không chặn, xem trang Chặn IP lý do "WAF phát hiện" trước khi bật chặn) / **Tắt**.
+BMC nào bị chặn nhầm: chuyển site đó sang "Chỉ ghi lại" rồi báo lại đường dẫn bị chặn (cột lý do ghi mã luật).
+
+### 36.3. Chống dò mật khẩu BMC
+
+Agent đếm số lần gửi đăng nhập (POST) vào trang BMC theo IP: iDRAC `/data/login`, `/sysmgmt/…/session`; iLO `/json/login_session`;
+AMI / MegaRAC `/rpc/WEBSES/create.asp`, `/api/session`; Supermicro `/cgi/login.cgi`; Lenovo XCC `/api/login`; Redfish
+`/redfish/v1/SessionService/Sessions`; đường dẫn khác có chữ login / logon / signin.
+
+Mặc định **10 lần / 10 phút → chặn IP 1 giờ** ở cả site. Khi chặn: agent chặn ngay, web tạo quy tắc chặn nhãn **tự động**
+(gỡ được ở bảng Quy tắc IP), ghi Nhật ký, gửi cảnh báo Telegram / email (loại "Tự chặn IP dò mật khẩu BMC").
+Trang đăng nhập **web quản trị** có cơ chế riêng (khoá IP / tài khoản sau nhiều lần sai, mục 20).

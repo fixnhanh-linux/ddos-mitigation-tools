@@ -28,7 +28,7 @@ COMMON = ["bmcproxy.py", "common/gw_common.py", "deploy/install.sh", "docs/HUONG
 PACKAGES = {
     "web": {
         "files": COMMON + ["controller/gw_controller.py", "controller/gw_db.py", "controller/gw_geoip.py", "controller/gw_ldap.py", "controller/gw_notify.py",
-                           "controller/gw_templates.py", "common/gw_render.py", "common/gw_auth.py",
+                           "controller/gw_templates.py", "common/gw_render.py", "common/gw_auth.py", "common/gw_shield.py",
                            "deploy/systemd/bmcproxy.service", "deploy/config.example.json"],
         "dirs": {"controller/web": "web", "deploy/grafana": "grafana"},
         "readme": """Treafix Proxy BB {v} - GOI WEB (frontend, server quan ly)
@@ -48,7 +48,7 @@ Chi tiet: HUONG-DAN-CAI-DAT.md
 """,
     },
     "agent": {
-        "files": COMMON + ["agent/gw_agent.py", "common/gw_auth.py", "agent/gw_errpage.py", "agent/gw_java.py",
+        "files": COMMON + ["agent/gw_agent.py", "common/gw_auth.py", "common/gw_shield.py", "agent/gw_errpage.py", "agent/gw_java.py",
                            "agent/gw_kvm.py", "agent/gw_limit.py", "agent/gw_nginx.py", "common/gw_render.py",
                            "deploy/systemd/traefik.service", "deploy/systemd/bmcproxy-agent.service",
                            "deploy/agent.example.json"],

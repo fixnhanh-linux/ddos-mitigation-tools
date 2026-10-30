@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from gw_shield import Shield
 from gw_common import GUEST_PATH, KVM_CTL_PATH, KVM_PATH, RE_HEADER_NAME, SETTINGS_DEFAULTS, hash_token, now_iso, \
     ssl_context
 
@@ -54,6 +55,7 @@ class AuthGateway:
         self.seen = {}          # (cong, ip, nguoi, loai) -> lan cuoi thay
         self.ip_rules = []      # chan / cho phep IP (web gui xuong moi lan sync): [(mang, "block"|"allow", cong, han, ghi chu)]
         self.denied = {}        # (cong, ip, ly do) -> {count, first, last, path}: lan bi chan chua gui ve web
+        self.shield = Shield()  # WAF + loc quoc gia + chong do mat khau (web gui cau hinh xuong)
 
     def _settings(self):
         rel = self.get_release() or {}
@@ -249,23 +251,29 @@ class AuthGateway:
         with self.lock:
             self.access = (items + self.access)[-3000:]
 
-    def check(self, port, cookie, guest_token="", ip="", uri="", open_mode=False):
+    def check(self, port, cookie, guest_token="", ip="", uri="", open_mode=False, method="GET", ua="", extra=""):
         """Tra ve (ma HTTP cho Traefik, header them vao request toi BMC).
-        open_mode: BMC tat xac thuc - khong bat dang nhap, chi chan IP bi chan + ghi luot truy cap."""
+        open_mode: BMC tat xac thuc - khong bat dang nhap, chi chan IP / quoc gia / WAF / do mat khau + ghi luot truy cap."""
         bmc = self._bmc(port)
         if not bmc or not bmc.get("enabled", True):
             return self._deny(port, ip, "disabled", uri, 403)
         rule = self.ip_rule(port, ip) if ip else None
         if rule and rule[0] == "block":  # IP bi chan: ke ca da dang nhap / co link khach
             return self._deny(port, ip, "blocked", uri, 403)
+        if rule and rule[0] == "allow":  # IP duoc phep (van phong / NOC): vao khong can dang nhap, bo qua lop bao ve
+            self._count(port, "ok")
+            self.log_access(port, ip, f"IP cho phép{': ' + rule[1] if rule[1] else ''}", uri)
+            return 200, {"Token-ip-allow": "true"}
+        hit = self.shield.inspect(port, ip, uri, method, ua, extra)
+        if hit:
+            reason, detail, blocked = hit
+            if blocked:
+                return self._deny(port, ip, reason, f"{uri} [{detail}]"[:160], 403)
+            self.note_denied(port, ip, reason, f"{uri} [{detail}]"[:160])  # WAF chi ghi: van cho qua
         if open_mode:
             self._count(port, "open")
             self.log_access(port, ip, "(không đăng nhập)", uri)
             return 200, {}
-        if rule and rule[0] == "allow":  # IP duoc phep (van phong / NOC): vao khong can dang nhap
-            self._count(port, "ok")
-            self.log_access(port, ip, f"IP cho phép{': ' + rule[1] if rule[1] else ''}", uri)
-            return 200, {"Token-ip-allow": "true"}
         g = self.guest(port, guest_token)
         if g:  # link tam cho khach (web cap, co han, thu hoi duoc)
             self._count(port, "ok")
@@ -469,7 +477,11 @@ def make_auth_handler(gateway):
                 code, headers = gateway.check(int(m.group(1)), self.cookie("proxyauthcookie"),
                                               self.cookie("bmcgw_guest"), self.client_ip(),
                                               self.headers.get("X-Forwarded-Uri") or "",
-                                              open_mode="open=1" in urllib.parse.urlparse(self.path).query)
+                                              open_mode="open=1" in urllib.parse.urlparse(self.path).query,
+                                              method=self.headers.get("X-Forwarded-Method") or "GET",
+                                              ua=self.headers.get("User-Agent") or "",
+                                              extra=" ".join(f"{k}: {v}" for k, v in self.headers.items()
+                                                             if k.lower() in ("referer", "cookie", "x-forwarded-host"))[:2000])
             body = b"" if code == 200 else {401: b"Unauthorized", 403: b"Forbidden"}.get(
                 code, b"Not found")
             self.send_response(code)

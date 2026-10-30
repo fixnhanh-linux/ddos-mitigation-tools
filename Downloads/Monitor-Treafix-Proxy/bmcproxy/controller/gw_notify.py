@@ -26,6 +26,7 @@ EVENTS = {
     "apply_failed": "Áp dụng cấu hình lỗi",
     "login_locked": "Tài khoản bị khoá do sai mật khẩu nhiều lần",
     "agent_update": "Kết quả cập nhật agent",
+    "autoban": "Tự chặn IP dò mật khẩu BMC",
 }
 NOTIFY_DEFAULTS = {
     "telegram": {"enabled": False, "bot_token": "", "chat_id": "", "api": "https://api.telegram.org"},

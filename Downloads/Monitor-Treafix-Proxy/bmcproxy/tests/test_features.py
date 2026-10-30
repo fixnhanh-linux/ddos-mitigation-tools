@@ -326,6 +326,47 @@ class SiteTest(unittest.TestCase):
         self.assertIn('bmcproxy_denied_24h{site="hcm",reason="no-login"} 4', text)
         self.assertIn("# TYPE bmcproxy_auth_requests_total counter", text)
 
+    def test_security_shield(self):
+        from gw_auth import AuthGateway
+        for _ in range(50):
+            if req(self.port, "GET", "/api/geoip", None, self.ck)[2].get("ready"):
+                break
+            time.sleep(0.1)
+        bad = {"sites": ["hcm"], "geo": {"mode": "allow", "countries": "VNM"}}
+        self.assertEqual(req(self.port, "PUT", "/api/security", bad, self.ck)[0], 400)
+        s, _, r = req(self.port, "PUT", "/api/security", {"sites": ["hcm"], "geo": {"mode": "allow", "countries": "vn"},
+                                                          "waf": {"mode": "block", "scanner": "1"},
+                                                          "brute": {"enabled": "1", "limit": 3, "window": 300, "ban": 900}}, self.ck)
+        self.assertEqual(s, 200, r)
+        sec = self.sync()[2]["security"]
+        self.assertEqual((sec["geo"]["mode"], sec["geo"]["countries"]), ("allow", ["VN"]))
+        self.assertTrue(sec["geo"]["v4"])
+        self.assertNotIn("security", self.sync({"security_rev": sec["rev"]})[2])  # da nhan -> khong gui lai
+        # agent: loc quoc gia, WAF, do mat khau -> tu chan
+        gw = AuthGateway(lambda: {"bmcs": [{"port": 8001, "enabled": True}]})
+        gw.shield.set_config(sec)
+        self.assertEqual(gw.check(8001, "", "", "113.160.9.9", "/", open_mode=True)[0], 200)      # VN
+        self.assertEqual(gw.check(8001, "", "", "104.28.9.9", "/", open_mode=True)[0], 403)       # US
+        self.assertEqual(gw.check(8001, "", "", "10.1.2.3", "/", open_mode=True)[0], 200)         # noi bo
+        self.assertEqual(gw.check(8001, "", "", "113.160.9.9", "/x?f=../../etc/passwd", open_mode=True)[0], 403)
+        self.assertEqual(gw.check(8001, "", "", "113.160.9.9", "/", open_mode=True, ua="sqlmap/1.8")[0], 403)
+        for _ in range(4):
+            code = gw.check(8001, "", "", "113.160.7.7", "/data/login", open_mode=True, method="POST")[0]
+        self.assertEqual(code, 403)
+        self.assertEqual(gw.check(8001, "", "", "113.160.7.7", "/index.html", open_mode=True)[0], 403)  # dang bi chan
+        reasons = {d["reason"] for d in gw.pop_denied()}
+        self.assertTrue({"geo", "waf", "bruteforce"} <= reasons)
+        ev = gw.shield.pop_events()
+        self.assertEqual(len(ev), 1)
+        rules = self.sync({"autoban": ev})[2]["ip_rules"]
+        self.assertTrue(any(x["cidr"] == "113.160.7.7/32" and x["action"] == "block" for x in rules))
+        auto = [x for x in req(self.port, "GET", "/api/iprules", None, self.ck)[2] if x.get("auto")]
+        self.assertEqual(len(auto), 1)
+        self.assertEqual(req(self.port, "GET", "/api/security", None, self.ck)[2]["sites"][0]["geo"]["mode"], "allow")
+        # tra ve mac dinh cho test khac
+        req(self.port, "DELETE", f"/api/iprules/{auto[0]['id']}", None, self.ck)
+        req(self.port, "PUT", "/api/security", {"sites": ["hcm"], "geo": {"mode": "any", "countries": []}}, self.ck)
+
     def test_update_line_keeps_token(self):
         # agent ban cu: lenh 1 dong chi cai de code agent, khong doi token / agent.json
         before = self.st.sites["hcm"]["token_hash"]

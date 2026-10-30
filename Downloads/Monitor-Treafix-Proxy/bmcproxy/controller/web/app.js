@@ -1561,15 +1561,74 @@ async function openIpInfo(ip) {
 
 // ------------------------------------------------------------------ Chặn IP
 const DENY_LABEL = { "no-login": ["", "chưa đăng nhập"], session: ["warn", "phiên hết hạn / bị khoá"], target: ["warn", "sai target"],
-  disabled: ["", "BMC đang tắt"], blocked: ["bad", "IP bị chặn"], other: ["", "khác"] };
-let blockedData = { rows: [] }, ipRules = [];
+  disabled: ["", "BMC đang tắt"], blocked: ["bad", "IP bị chặn"], geo: ["bad", "ngoài quốc gia cho phép"], waf: ["bad", "WAF chặn"],
+  "waf-log": ["warn", "WAF phát hiện (chỉ ghi)"], bruteforce: ["bad", "dò mật khẩu"], other: ["", "khác"] };
+let blockedData = { rows: [] }, ipRules = [], shieldData = { sites: [] };
+const WAF_MODE = { off: ["", "tắt"], log: ["warn", "chỉ ghi"], block: ["ok", "chặn"] };
+const fmtDur = (s) => (s >= 86400 ? `${Math.round(s / 86400)} ngày` : s >= 3600 ? `${Math.round(s / 3600)} giờ` : `${Math.round(s / 60)} phút`);
+function renderShield() {
+  const d = shieldData;
+  $("#btn-shield-edit").classList.toggle("hidden", !d.sites.some((s) => s.can_edit));
+  const needGeo = d.sites.some((s) => s.geo.mode !== "any");
+  $("#shield-warn").innerHTML = needGeo && !d.geoip_ready
+    ? '<p class="form-msg error">Chưa có dữ liệu GeoIP: giới hạn quốc gia <b>tạm chưa chặn</b> (vào Cài đặt → Tải lại dữ liệu GeoIP).</p>' : "";
+  $("#shield-list").innerHTML = d.sites.map((s) => {
+    const g = s.geo;
+    const geo = g.mode === "any" ? '<span class="cell-sub">mọi nơi</span>'
+      : `${g.mode === "allow" ? '<span class="tag ok">chỉ</span>' : '<span class="tag bad">chặn</span>'} ${g.countries.map((c) => `<span class="tag geo-tag">${esc(c)}</span>`).join(" ")}`;
+    const [wc, wl] = WAF_MODE[s.waf.mode] || ["", s.waf.mode];
+    return `<tr><td><b>${esc(s.label)}</b></td><td>${geo}</td>
+      <td><span class="tag ${wc}">${wl}</span>${s.waf.mode !== "off" && s.waf.scanner ? ' <span class="cell-sub">+ công cụ quét</span>' : ""}</td>
+      <td>${s.brute.enabled ? `<span class="tag ok">bật</span> <span class="cell-sub">${s.brute.limit} lần / ${fmtDur(s.brute.window)} → chặn ${fmtDur(s.brute.ban)}</span>`
+        : '<span class="tag">tắt</span>'}</td>
+      <td>${!s.online ? '<span class="tag">mất kết nối</span>' : s.applied ? '<span class="tag ok">đã nhận</span>' : '<span class="tag warn" title="Agent cũ chưa có lớp bảo vệ: Site → Cập nhật agent">chưa nhận</span>'}</td>
+      <td style="text-align:right">${s.can_edit ? `<button class="btn small" data-shield-site="${esc(s.site)}">Sửa</button>` : ""}</td></tr>`;
+  }).join("") || '<tr><td colspan="6" class="hint">Chưa có site.</td></tr>';
+}
+function shieldForm(site) {
+  const d = shieldData;
+  const mine = d.sites.filter((s) => s.can_edit);
+  const cur = d.sites.find((s) => s.site === site) || mine[0];
+  if (!cur) return;
+  const rules = Object.values(d.waf_rules || {}).map((l) => `<li>${esc(l)}</li>`).join("");
+  formBox(site ? `Bảo vệ · ${cur.label}` : "Cài đặt bảo vệ", [
+    { type: "checks", name: "sites", label: "Áp dụng cho site", value: [cur.site], options: mine.map((s) => [s.site, s.label]) },
+    { type: "html", html: '<h3 class="mt">Giới hạn quốc gia</h3><p class="hint">Theo IP người truy cập (GeoIP). IP mạng nội bộ và IP trong danh sách <b>Cho phép</b> luôn được vào.'
+      + ' Người dùng ở nước ngoài / dùng VPN nước ngoài sẽ bị chặn khi chọn "Chỉ Việt Nam".</p>' },
+    { type: "select", name: "geo_mode", label: "Cho phép truy cập từ", value: cur.geo.mode, span: false,
+      options: [["any", "Mọi nơi (quốc tế)"], ["allow", "Chỉ các nước dưới đây (vd chỉ Việt Nam)"], ["deny", "Mọi nơi trừ các nước dưới đây"]] },
+    { name: "geo_countries", label: "Mã nước (cách nhau dấu phẩy)", value: (cur.geo.countries.length ? cur.geo.countries : ["VN"]).join(", "), placeholder: "VN, SG", span: false },
+    { type: "html", html: '<h3 class="mt">WAF - bộ luật dựng sẵn</h3><details><summary class="hint">Các luật đang có</summary><ul class="hint">' + rules + "</ul></details>" },
+    { type: "select", name: "waf_mode", label: "Chế độ WAF", value: cur.waf.mode, span: false,
+      options: [["block", "Chặn (khuyên dùng)"], ["log", "Chỉ ghi lại, không chặn (thử trước)"], ["off", "Tắt"]] },
+    { type: "select", name: "waf_scanner", label: "Chặn công cụ quét (sqlmap, nikto, nmap…)", value: cur.waf.scanner ? "1" : "", span: false,
+      options: [["1", "Có"], ["", "Không"]] },
+    { type: "html", html: '<h3 class="mt">Chống dò mật khẩu BMC</h3><p class="hint">Đếm số lần gửi đăng nhập vào trang BMC (iDRAC, iLO, AMI, Supermicro, XCC, Redfish) theo IP.'
+      + ' Quá ngưỡng: agent chặn IP đó ở cả site ngay lập tức, web tạo quy tắc chặn "tự động" (gỡ được ở bảng Quy tắc IP) và gửi cảnh báo.</p>' },
+    { type: "select", name: "brute_enabled", label: "Chống dò mật khẩu", value: cur.brute.enabled ? "1" : "", span: false, options: [["1", "Bật"], ["", "Tắt"]] },
+    { name: "brute_limit", label: "Số lần đăng nhập tối đa", type: "number", value: cur.brute.limit, span: false },
+    { type: "select", name: "brute_window", label: "Trong khoảng", value: String(cur.brute.window), span: false,
+      options: [["300", "5 phút"], ["600", "10 phút"], ["1800", "30 phút"], ["3600", "1 giờ"]] },
+    { type: "select", name: "brute_ban", label: "Chặn IP trong", value: String(cur.brute.ban), span: false,
+      options: [["900", "15 phút"], ["3600", "1 giờ"], ["21600", "6 giờ"], ["86400", "1 ngày"], ["604800", "7 ngày"]] },
+  ], async (v) => {
+    await api("PUT", "security", { sites: v.sites, geo: { mode: v.geo_mode, countries: v.geo_countries },
+      waf: { mode: v.waf_mode, scanner: v.waf_scanner }, brute: { enabled: v.brute_enabled, limit: v.brute_limit, window: v.brute_window, ban: v.brute_ban } });
+    toast(`Đã lưu bảo vệ cho ${v.sites.length} site · agent nhận trong ~10 giây`);
+    loadBlocked();
+  });
+}
+$("#btn-shield-edit").addEventListener("click", () => shieldForm(null));
+$("#shield-list").addEventListener("click", (e) => { const b = e.target.closest("[data-shield-site]"); if (b) shieldForm(b.dataset.shieldSite); });
 async function loadBlocked() {
   const sel = $("#blocked-site");
   if (sel.options.length <= 1) sel.innerHTML += state.sites.map((s) => `<option value="${esc(s.key)}">${esc(s.label)}</option>`).join("");
   const rs = $("#blocked-reason");
   if (rs.options.length <= 1) rs.innerHTML += Object.entries(DENY_LABEL).map(([k, [, l]]) => `<option value="${k}">${esc(l)}</option>`).join("");
   $("#btn-iprule-add").classList.toggle("hidden", !can("iprules"));
-  [blockedData, ipRules] = await Promise.all([api("GET", `blocked?days=${$("#blocked-days").value}`), api("GET", "iprules")]);
+  [blockedData, ipRules, shieldData] = await Promise.all([api("GET", `blocked?days=${$("#blocked-days").value}`), api("GET", "iprules"),
+    api("GET", "security")]);
+  renderShield();
   renderIpRules();
   renderBlocked();
 }
@@ -1578,7 +1637,7 @@ function renderIpRules() {
   $("#nav-rule-count").textContent = active.length || "";
   $("#iprule-list").innerHTML = ipRules.map((r) => `<tr class="${r.status === "active" ? "" : "off"}">
     <td class="mono"><b>${esc(r.cidr)}</b></td>
-    <td>${r.action === "block" ? '<span class="tag bad">chặn</span>' : '<span class="tag ok">cho phép</span>'}</td>
+    <td>${r.action === "block" ? '<span class="tag bad">chặn</span>' : '<span class="tag ok">cho phép</span>'}${r.auto ? ' <span class="tag warn" title="Agent tự chặn vì dò mật khẩu">tự động</span>' : ""}</td>
     <td><span class="tag">${esc(siteLabel(r.site))}</span> ${r.port ? `<span class="mono">cổng ${r.port}</span>` : '<span class="cell-sub">mọi BMC</span>'}</td>
     <td>${r.status === "expired" ? '<span class="tag">đã hết hạn</span>' : r.expires ? `<span class="mono cell-sub">${esc(r.expires.replace("T", " "))}</span>` : '<span class="cell-sub">không hạn</span>'}</td>
     <td>${esc(r.note || "")}</td><td class="cell-sub">${esc(r.created_by || "")}<div>${esc(fmtTs(r.created_at || ""))}</div></td>
