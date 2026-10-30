@@ -559,7 +559,7 @@ async function loadStats(force = false) {
   const topIp = Math.max(1, ...s.top_ips.map((x) => x.count));
   $("#ov-ip-count").textContent = s.ips ? `${s.ips} IP` : "";
   $("#ov-top-ips").innerHTML = rank(s.top_ips, topIp, (x, w) => `<div class="list-item rank-item">
-      <span class="grow"><span class="rank-txt"><b class="mono">${esc(x.ip)}</b> <span class="cell-sub">· ${x.bmcs} BMC · ${esc(fmtTs(x.last).slice(5, 16))}</span></span>
+      <span class="grow"><span class="rank-txt">${ipCell(x.ip, x.geo)} <span class="cell-sub">· ${x.bmcs} BMC · ${esc(fmtTs(x.last).slice(5, 16))}</span></span>
         <span class="rank-bar"><i style="width:${w}%"></i></span></span>
       <b class="num">${fmtNum(x.count)}</b></div>`) || '<div class="list-empty">Chưa có.</div>';
   $("#ov-top-users").innerHTML = s.top_users.map((x) => `<div class="list-item">
@@ -568,6 +568,12 @@ async function loadStats(force = false) {
   const topSite = Math.max(1, ...s.by_site.map((x) => x.count));
   $("#ov-by-site").innerHTML = rank(s.by_site, topSite, (x, w) => `<div class="list-item rank-item">
       <span class="grow"><span class="rank-txt">${esc(siteLabel(x.site))}</span><span class="rank-bar"><i style="width:${w}%"></i></span></span>
+      <b class="num">${fmtNum(x.count)}</b></div>`) || '<div class="list-empty">Chưa có.</div>';
+  const topC = Math.max(1, ...(s.by_country || []).map((x) => x.count));
+  $("#ov-geo-hint").textContent = s.geo_ready ? "theo IP truy cập" : "chưa có dữ liệu GeoIP";
+  $("#ov-by-country").innerHTML = rank(s.by_country || [], topC, (x, w) => `<div class="list-item rank-item">
+      <span class="grow"><span class="rank-txt">${geoTag({ cc: x.cc === "LAN" || x.cc === "ZZ" ? "" : x.cc, scope: x.cc === "LAN" ? "private" : "public" })}
+        ${esc(x.country)} <span class="cell-sub">· ${x.ips} IP</span></span><span class="rank-bar"><i style="width:${w}%"></i></span></span>
       <b class="num">${fmtNum(x.count)}</b></div>`) || '<div class="list-empty">Chưa có.</div>';
   const bl = s.blocked || {};
   const gm = [
@@ -1488,8 +1494,71 @@ document.addEventListener("click", async (e) => {
 // ------------------------------------------------------------------ Truy cập BMC
 const ACCESS_KIND = { web: ["", "trang BMC"], console: ["info", "console"], "guest-open": ["warn", "khách mở link"] };
 let accessRows = [];
-["#access-site", "#access-kind"].forEach((id) => $(id).addEventListener("input", renderAccess));
+["#access-site", "#access-kind", "#access-geo"].forEach((id) => $(id).addEventListener("input", renderAccess));
 $("#access-q").addEventListener("input", renderAccess);
+// ------------------------------------------------------------------ IP: quốc gia / nhà mạng, trang chi tiết
+const geoTag = (g) => {
+  if (!g) return "";
+  if (g.scope === "private") return '<span class="tag info geo-tag" title="Mạng nội bộ">LAN</span>';
+  if (!g.cc) return '<span class="tag geo-tag" title="Chưa rõ quốc gia">?</span>';
+  return `<span class="tag ${g.cc === "VN" ? "ok" : "warn"} geo-tag" title="${esc(g.country || g.cc)}">${esc(g.cc)}</span>`;
+};
+function ipCell(ip, g) {
+  if (!ip) return '<span class="cell-sub">?</span>';
+  const org = g && (g.org || (g.scope === "private" ? "mạng nội bộ" : ""));
+  return `<span class="ip-cell"><a href="#" class="mono ip-link" data-ip="${esc(ip)}" title="Xem chi tiết IP">${esc(ip)}</a>${geoTag(g)}`
+    + (org ? `<span class="cell-sub ip-org" title="${esc((g.asn ? "AS" + g.asn + " · " : "") + org)}">${esc(org)}</span>` : "") + "</span>";
+}
+const geoMatch = (g, where) => !where || (where === "vn" ? !!g && g.cc === "VN" : where === "foreign" ? !!g && !!g.cc && g.cc !== "VN"
+  : where === "private" ? !!g && g.scope === "private" : !g || (!g.cc && g.scope !== "private"));
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a.ip-link[data-ip]");
+  if (!a) return;
+  e.preventDefault();
+  openIpInfo(a.dataset.ip);
+});
+async function openIpInfo(ip) {
+  let r;
+  try { r = await api("GET", `ipinfo?ip=${encodeURIComponent(ip)}`); } catch (err) { return toast(err.message, true); }
+  const g = r.geo || {};
+  const kv = [["Quốc gia", g.scope === "private" ? "Mạng nội bộ" : g.country ? `${g.country} (${g.cc})` : "chưa rõ (chưa có dữ liệu GeoIP)"],
+    ["Nhà mạng", g.org ? `${g.org}${g.asn ? ` · AS${g.asn}` : ""}` : "-"],
+    ["Lần đầu / cuối", r.first ? `${fmtTs(r.first)} → ${fmtTs(r.last)}` : "chưa mở BMC nào (30 ngày)"]];
+  const kpi = [["Lượt mở BMC", r.access_total, "30 ngày", ""], ["BMC đã mở", r.bmcs.length, "", ""],
+    ["Người dùng", r.users.length, "", ""], ["Bị chặn", r.denied_total, "request 30 ngày", r.denied_total ? "warn" : ""]];
+  const tbl = (head, rows, empty) => rows.length ? `<div class="table-wrap"><table class="table"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.join("")}</tbody></table></div>` : `<p class="hint">${empty}</p>`;
+  const bmc = (x) => `<b class="mono">${x.port}</b> <span class="cell-sub">${esc(x.note || "")} · ${esc(siteLabel(x.site))}</span>`;
+  const sites = [...new Set([...r.bmcs, ...r.denied].map((x) => x.site))];
+  const canRule = sites.some((s) => can("iprules", s)) || (!sites.length && can("iprules"));
+  infoBox(`IP ${ip}`, `<div class="ipinfo">
+    <dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
+    <div class="kpis ipinfo-kpis">${kpi.map(([l, n, f, c]) => `<div class="kpi ${c}"><div class="lbl">${l}</div><div class="num">${fmtNum(n)}</div><div class="foot">${f}</div></div>`).join("")}</div>
+    ${r.rules.length ? `<p>${r.rules.map((x) => `${x.action === "block" ? '<span class="tag bad">đang chặn</span>' : '<span class="tag ok">đang cho phép</span>'}
+      <span class="mono">${esc(x.cidr)}</span> · ${esc(siteLabel(x.site))}${x.port ? ` cổng ${x.port}` : ""}${x.expires ? ` · đến ${esc(x.expires.replace("T", " "))}` : ""}`).join("<br>")}</p>` : ""}
+    <div class="ipinfo-actions">
+      ${canRule ? `<button type="button" class="btn small danger-ghost" data-ipinfo-act="block">Chặn IP này</button>
+        <button type="button" class="btn small" data-ipinfo-act="allow">Cho phép IP này</button>` : ""}
+      <button type="button" class="btn small" data-ipinfo-act="access">Xem ở trang Truy cập</button>
+      <button type="button" class="btn small ghost" data-copy="${esc(ip)}">Sao chép IP</button>
+    </div>
+    <h3 class="mt">BMC đã mở</h3>${tbl(["BMC", "Lượt", "Lần cuối"], r.bmcs.map((x) => `<tr><td>${bmc(x)}</td><td>${x.count}</td><td class="mono cell-sub">${esc(fmtTs(x.last))}</td></tr>`), "Chưa mở BMC nào.")}
+    <h3 class="mt">Người dùng từ IP này</h3>${tbl(["Người dùng", "Lượt"], r.users.map((x) => `<tr><td>${esc(x.user)}</td><td>${x.count}</td></tr>`), "Chưa có.")}
+    <h3 class="mt">Bị chặn</h3>${tbl(["BMC", "Lần", "Lý do", "Lần cuối"], r.denied.map((x) => `<tr><td>${bmc(x)}</td><td>${fmtNum(x.count)}</td>
+      <td>${Object.keys(x.reasons).map((k) => `<span class="tag ${(DENY_LABEL[k] || [""])[0]}">${esc((DENY_LABEL[k] || ["", k])[1])}</span>`).join(" ")}</td>
+      <td class="mono cell-sub">${esc(fmtTs(x.last))}</td></tr>`), "Không bị chặn lần nào.")}
+    <h3 class="mt">Lần mở gần đây</h3>${tbl(["Thời điểm", "Người dùng", "BMC", "Loại"], r.access.slice(0, 30).map((a) => `<tr><td class="mono">${esc(fmtTs(a.ts))}</td>
+      <td>${esc(a.user || "")}</td><td>${bmc(a)}</td><td>${(ACCESS_KIND[a.kind] || ["", a.kind])[1]}</td></tr>`), "Chưa có.")}
+  </div>`);
+  $("#info-body").onclick = (e) => {
+    const b = e.target.closest("[data-ipinfo-act]");
+    if (!b) return;
+    if (b.dataset.ipinfoAct === "access") { $("#dlg-info").close(); location.hash = "access"; $("#access-q").value = ip; setTimeout(renderAccess, 600); return; }
+    $("#dlg-info").close();
+    ipRuleForm({ cidr: ip, action: b.dataset.ipinfoAct, site: sites[0] || "", note: "" });
+  };
+}
+
 // ------------------------------------------------------------------ Chặn IP
 const DENY_LABEL = { "no-login": ["", "chưa đăng nhập"], session: ["warn", "phiên hết hạn / bị khoá"], target: ["warn", "sai target"],
   disabled: ["", "BMC đang tắt"], blocked: ["bad", "IP bị chặn"], other: ["", "khác"] };
@@ -1518,7 +1587,8 @@ function renderIpRules() {
 }
 function blockedFiltered() {
   const site = $("#blocked-site").value, reason = $("#blocked-reason").value, q = $("#blocked-q").value.trim().toLowerCase();
-  return blockedData.rows.filter((r) => (!site || r.site === site) && (!reason || r.reasons[reason])
+  const where = $("#blocked-geo").value;
+  return blockedData.rows.filter((r) => (!site || r.site === site) && (!reason || r.reasons[reason]) && geoMatch(r.geo, where)
     && (!q || [r.ip, r.port, r.note].some((x) => String(x ?? "").toLowerCase().includes(q))));
 }
 function renderBlocked() {
@@ -1540,7 +1610,7 @@ function renderBlocked() {
     const act = can("iprules", r.site) ? (r.rule === "block" ? '<span class="cell-sub">đang chặn</span>'
       : `<button class="btn small danger-ghost" data-block-ip="${esc(r.ip)}" data-site="${esc(r.site)}" data-port="${r.port}">Chặn IP</button>
          <button class="btn small" data-allow-ip="${esc(r.ip)}" data-site="${esc(r.site)}" data-port="${r.port}">Cho phép</button>`) : "";
-    return `<tr><td class="mono"><b>${esc(r.ip || "?")}</b>${r.rule === "allow" ? ' <span class="tag ok">cho phép</span>' : ""}</td>
+    return `<tr><td>${ipCell(r.ip, r.geo)}${r.rule === "allow" ? ' <span class="tag ok">cho phép</span>' : ""}</td>
       <td><span class="tag">${esc(siteLabel(r.site))}</span></td>
       <td><b class="mono">${r.port}</b>${r.note ? `<div class="cell-sub">${esc(r.note)}</div>` : ""}</td>
       <td class="mono"><b>${fmtNum(r.count)}</b></td><td>${reasons}</td>
@@ -1548,7 +1618,7 @@ function renderBlocked() {
       <td style="text-align:right;white-space:nowrap">${act}</td></tr>`;
   }).join("") || '<tr><td colspan="7" class="hint" style="padding:24px">Chưa có lượt bị chặn nào (agent cần bản mới để ghi IP bị chặn).</td></tr>';
 }
-["#blocked-q", "#blocked-site", "#blocked-reason"].forEach((s) => $(s).addEventListener("input", renderBlocked));
+["#blocked-q", "#blocked-site", "#blocked-reason", "#blocked-geo"].forEach((s) => $(s).addEventListener("input", renderBlocked));
 $("#blocked-days").addEventListener("change", loadBlocked);
 function ipRuleForm(pre = {}) {
   const sites = state.sites.filter((s) => can("iprules", s.key));
@@ -1592,7 +1662,8 @@ async function loadAccess() {
 }
 function accessFiltered() {
   const site = $("#access-site").value, kind = $("#access-kind").value, q = $("#access-q").value.trim().toLowerCase();
-  return accessRows.filter((a) => (!site || a.site === site)
+  const where = $("#access-geo").value;
+  return accessRows.filter((a) => (!site || a.site === site) && geoMatch(a.geo, where)
     && (!kind || (kind === "guest" ? /^khách/.test(a.user) || a.kind === "guest-open" : a.kind === kind && !/^khách/.test(a.user)))
     && (!q || [a.user, a.ip, a.port, a.note, a.path].some((x) => String(x ?? "").toLowerCase().includes(q))));
 }
@@ -1603,7 +1674,7 @@ function renderAccess() {
     const [cls, label] = ACCESS_KIND[a.kind] || ["", a.kind];
     return `<tr><td class="mono">${esc(fmtTs(a.ts))}</td>
       <td>${/^khách/.test(a.user) ? `<span class="tag warn">${esc(a.user)}</span>` : esc(a.user)}</td>
-      <td class="mono">${esc(a.ip)}</td><td><span class="tag">${esc(siteLabel(a.site))}</span></td>
+      <td>${ipCell(a.ip, a.geo)}</td><td><span class="tag">${esc(siteLabel(a.site))}</span></td>
       <td><b class="mono">${esc(a.port)}</b>${a.note ? `<div class="cell-sub">${esc(a.note)}</div>` : ""}</td>
       <td><span class="tag ${cls}" title="${esc(a.path || "")}">${label}</span></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="hint" style="padding:24px">Chưa có lượt truy cập nào. Site cần agent bản mới (Site → Cập nhật agent) rồi Áp dụng.</td></tr>';
@@ -2056,8 +2127,24 @@ function renderSettings() {
       + `${(r.storage.blobs || {}).session ? "có" : "chưa có"} phiên đăng nhập`]] : []),
     ...(r.storage.error ? [["Lỗi DB", r.storage.error]] : [])] : []),
     ["API Zabbix", r.zabbix_enabled ? "/api/zabbix · /api/zabbix?type=sites (header X-Api-Token)" : "tắt — đặt zabbix_token trong config.json"],
-  ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    ["Prometheus / Grafana", r.metrics_enabled ? `${location.origin}${BASE}api/metrics (header Authorization: Bearer <metrics_token>)`
+      : "tắt — đặt metrics_token trong config.json"],
+    ["GeoIP (quốc gia / nhà mạng của IP)", r.geoip ? (r.geoip.ready
+      ? `${r.geoip.source} · cập nhật ${String((r.geoip.country || {}).date || "").replace("T", " ")} · ${fmtNum((r.geoip.country || {}).rows || 0)} dải IP`
+        + (r.geoip.asn ? ` · nhà mạng ${fmtNum(r.geoip.asn.rows)} dải` : "")
+      : (r.geoip.busy ? "đang tải dữ liệu…" : "chưa có dữ liệu" + (r.geoip.error ? ` (${r.geoip.error})` : ""))) : "-"],
+  ].map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")
+    + (isAdmin() ? `<dt></dt><dd><button type="button" class="btn small" id="btn-geoip-update">Tải lại dữ liệu GeoIP</button></dd>` : "");
 }
+
+$("#server-info").addEventListener("click", async (e) => {
+  const b = e.target.closest("#btn-geoip-update");
+  if (!b) return;
+  b.disabled = true;
+  b.textContent = "Đang tải (~30 giây)…";
+  try { const r = await api("POST", "geoip"); toast(r.message || "Xong"); renderSettings(); }
+  catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Tải lại dữ liệu GeoIP"; }
+});
 
 $("#settings-form").addEventListener("submit", async (e) => {
   e.preventDefault();

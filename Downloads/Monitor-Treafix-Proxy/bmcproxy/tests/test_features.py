@@ -20,6 +20,7 @@ import urllib.parse
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.environ["BMCPROXY_NO_GEOIP_DOWNLOAD"] = "1"  # test khong tai du lieu GeoIP tu internet
 for d in ("agent", "controller", "common"):
     sys.path.insert(0, os.path.join(ROOT, d))
 # Windows: console cp1252 khong in duoc tieng Viet -> serve() chet ngay luc in dong khoi dong
@@ -210,7 +211,16 @@ class SiteTest(unittest.TestCase):
         cfgp = os.path.join(cls.tmp, "config.json")
         with open(cfgp, "w") as f:
             json.dump({"listen_host": "127.0.0.1", "listen_port": cls.port, "data_dir": os.path.join(cls.tmp, "data"),
-                       "backup_dir": os.path.join(cls.tmp, "bk")}, f)
+                       "backup_dir": os.path.join(cls.tmp, "bk"), "metrics_token": "m-" + "x" * 20}, f)
+        # du lieu GeoIP gia (dinh dang DB-IP Lite): 113.160.0.0/16 = VN / VNPT, 104.28.0.0/16 = US / Cloudflare
+        import gzip
+        gdir = os.path.join(cls.tmp, "data", "geoip")
+        os.makedirs(gdir)
+        with gzip.open(os.path.join(gdir, "dbip-country-lite.csv.gz"), "wt") as f:
+            f.write("104.28.0.0,104.28.255.255,US\n113.160.0.0,113.160.255.255,VN\n"
+                    "2001:ee0::,2001:ee0:ffff:ffff:ffff:ffff:ffff:ffff,VN\n")
+        with gzip.open(os.path.join(gdir, "dbip-asn-lite.csv.gz"), "wt") as f:
+            f.write('104.28.0.0,104.28.255.255,13335,"Cloudflare, Inc."\n113.160.0.0,113.160.255.255,45899,VNPT Corp\n')
         cls.st = Store(load_controller_config(cfgp))
         pw = "T-" + secrets.token_hex(8)
         cls.st.users["admin"] = {**hash_password(pw), "role": "admin", "sites": []}
@@ -286,6 +296,35 @@ class SiteTest(unittest.TestCase):
         self.assertFalse([x for x in self.sync()[2]["guests"] if x["id"] == g["id"]])
         lst = req(self.port, "GET", "/api/guests", None, self.ck)[2]
         self.assertEqual(next(x for x in lst if x["id"] == g["id"])["status"], "revoked")
+
+    def test_geoip_ipinfo_metrics(self):
+        for _ in range(50):  # GeoIP nap nen luc khoi dong
+            if req(self.port, "GET", "/api/geoip", None, self.ck)[2].get("ready"):
+                break
+            time.sleep(0.1)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self.sync({"access": [{"ts": now, "port": 8099, "ip": "113.160.5.7", "user": "noc@vn", "kind": "web", "path": "/"},
+                              {"ts": now, "port": 8099, "ip": "104.28.1.2", "user": "(không đăng nhập)", "kind": "web", "path": "/"}],
+                   "denied": [{"port": 8099, "ip": "113.160.5.7", "reason": "no-login", "count": 4, "first": now, "last": now, "path": "/"}]})
+        r = req(self.port, "GET", "/api/stats?range=24h", None, self.ck)[2]
+        geo = {x["ip"]: x["geo"] for x in r["top_ips"]}
+        self.assertEqual((geo["113.160.5.7"]["cc"], geo["113.160.5.7"]["org"]), ("VN", "VNPT Corp"))
+        self.assertEqual((geo["104.28.1.2"]["cc"], geo["104.28.1.2"]["org"]), ("US", "Cloudflare, Inc."))
+        self.assertIn("VN", [c["cc"] for c in r["by_country"]])
+        info = req(self.port, "GET", "/api/ipinfo?ip=113.160.5.7", None, self.ck)[2]
+        self.assertEqual((info["geo"]["country"], info["access_total"], info["denied_total"]), ("Việt Nam", 1, 4))
+        self.assertEqual(info["bmcs"][0]["port"], 8099)
+        self.assertEqual(req(self.port, "GET", "/api/ipinfo?ip=10.0.0.1", None, self.ck)[2]["geo"]["scope"], "private")
+        self.assertEqual(req(self.port, "GET", "/api/ipinfo?ip=khong-phai-ip", None, self.ck)[0], 400)
+        # Prometheus: can token
+        self.assertEqual(req(self.port, "GET", "/api/metrics", None)[0], 401)
+        s, h, body = req(self.port, "GET", "/api/metrics", None, {"Authorization": "Bearer m-" + "x" * 20})
+        text = body.decode()
+        self.assertEqual(s, 200)
+        self.assertIn('bmcproxy_site_online{site="hcm"', text)
+        self.assertIn('bmcproxy_access_country_24h{country="VN"}', text)
+        self.assertIn('bmcproxy_denied_24h{site="hcm",reason="no-login"} 4', text)
+        self.assertIn("# TYPE bmcproxy_auth_requests_total counter", text)
 
     def test_update_line_keeps_token(self):
         # agent ban cu: lenh 1 dong chi cai de code agent, khong doi token / agent.json

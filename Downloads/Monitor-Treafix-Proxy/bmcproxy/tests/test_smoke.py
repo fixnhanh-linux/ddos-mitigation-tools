@@ -16,6 +16,7 @@ import threading
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.environ["BMCPROXY_NO_GEOIP_DOWNLOAD"] = "1"  # test khong tai du lieu GeoIP tu internet
 for d in ("agent", "controller", "common"):
     sys.path.insert(0, os.path.join(ROOT, d))
 # Windows: console cp1252 khong in duoc tieng Viet -> serve() chet ngay luc in dong khoi dong

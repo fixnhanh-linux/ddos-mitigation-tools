@@ -160,6 +160,10 @@
           <div id="ov-by-site" class="list"></div>
         </div>
         <div class="panel">
+          <div class="panel-head"><h2>Theo quốc gia</h2><span class="hint" id="ov-geo-hint">theo IP truy cập</span></div>
+          <div id="ov-by-country" class="list"></div>
+        </div>
+        <div class="panel ov-wide">
           <div class="panel-head"><h2>Bảo vệ · link khách · bảo trì</h2><a href="#blocked" class="link">Chặn IP</a></div>
           <div id="ov-guest-maint" class="list"></div>
         </div>
@@ -271,6 +275,7 @@
         <input id="blocked-q" type="search" placeholder="Tìm IP, cổng, ghi chú BMC…" aria-label="Tìm lượt bị chặn">
         <select id="blocked-site" aria-label="Lọc site"><option value="">Mọi site</option></select>
         <select id="blocked-reason" aria-label="Lọc lý do"><option value="">Mọi lý do</option></select>
+        <select id="blocked-geo" aria-label="Lọc theo nơi"><option value="">Mọi nơi</option><option value="vn">Việt Nam</option><option value="foreign">Nước ngoài</option><option value="private">Mạng nội bộ</option><option value="unknown">Chưa rõ</option></select>
         <select id="blocked-days" aria-label="Khoảng thời gian"><option value="1">24 giờ</option><option value="7" selected>7 ngày</option><option value="30">30 ngày</option></select>
         <span id="blocked-count" class="hint"></span>
       </div>
@@ -291,6 +296,7 @@
       <div class="toolbar audit-tools mt">
         <input id="access-q" type="search" placeholder="Tìm người dùng, IP, cổng, ghi chú…" aria-label="Tìm lượt truy cập">
         <select id="access-site" aria-label="Lọc site"><option value="">Mọi site</option></select>
+<select id="access-geo" aria-label="Lọc theo nơi"><option value="">Mọi nơi</option><option value="vn">Việt Nam</option><option value="foreign">Nước ngoài</option><option value="private">Mạng nội bộ</option><option value="unknown">Chưa rõ</option></select>
         <select id="access-kind" aria-label="Lọc loại"><option value="">Web + console + khách</option>
           <option value="web">Mở trang BMC</option><option value="console">Mở console</option><option value="guest">Khách (link tạm)</option></select>
         <span id="access-count" class="hint"></span>

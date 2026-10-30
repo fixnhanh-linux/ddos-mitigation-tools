@@ -39,6 +39,7 @@ Cổng truy cập BMC / IPMI (iDRAC, iLO, AMI, Supermicro…) cho **nhiều site
 | Bảo mật | Xác thực bật sẵn cho web + console. Target bắt buộc theo BMC. Chặn giả mạo header `Token-*`. TLS ≥ 1.2. Mật khẩu PBKDF2, khoá khi sai 5 lần, chống CSRF, CSP |
 | Phân quyền | **Quản trị**: toàn quyền. **Vận hành** / **Chỉ xem**: theo site được giao, tick từng quyền (thêm / sửa / xoá BMC, áp dụng, dò, bảo trì, link khách, thống kê, nhật ký, xuất CSV) |
 | Chặn IP | Lượt bị chặn theo IP / BMC / lý do; chặn hoặc cho phép IP (dải, thời hạn) theo site / BMC, agent nhận ngay không cần Áp dụng |
+| Thông tin IP / Grafana | IP kèm quốc gia + nhà mạng (DB-IP Lite, offline), trang chi tiết IP, lọc Việt Nam / nước ngoài; `/api/metrics` cho Prometheus + dashboard Grafana (`deploy/grafana/`) |
 | Giám sát | Tổng quan 4 site. BMC mất kết nối (kiểm tra từ chính server của site). Lượt xác thực / bị chặn. Cảnh báo chứng chỉ, nginx chiếm cổng, agent mất liên lạc. API Zabbix |
 | Sao lưu | Web: danh sách BMC, site, cài đặt. Mỗi server: config Traefik trước mỗi lần áp dụng (giữ 30 bản) |
 | Cảnh báo | Telegram / email: site mất liên lạc, BMC mất kết nối, BMC sắp hết hạn, áp dụng lỗi, khoá tài khoản, cập nhật agent |

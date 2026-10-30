@@ -1323,3 +1323,47 @@ site, một BMC hoặc mọi BMC của site, thời hạn (1 giờ … không h�
 - Quyền **chặn / cho phép IP** mặc định chỉ Quản trị có; Vận hành cần tick thêm ở Người dùng → Quyền chi tiết.
 - IP là địa chỉ Traefik nhìn thấy. Site đứng sau proxy khác (nginx, Cloudflare…) thì đó là IP của proxy đó - đừng cho phép IP proxy.
 - Cần agent bản mới: Site → **Cập nhật agent**.
+
+## 35. Thông tin IP (quốc gia, nhà mạng) và Grafana
+
+### 35.1. IP Việt Nam hay nước ngoài
+
+Mọi IP trên web (Tổng quan, Truy cập BMC, Chặn IP) hiện kèm **mã nước** (`VN` xanh, nước ngoài vàng, `LAN` = mạng nội bộ)
+và **nhà mạng / ASN** (VNPT, Viettel, FPT, Cloudflare…). Trang Truy cập và Chặn IP có bộ lọc **Việt Nam / Nước ngoài / Nội bộ**.
+Tổng quan có thêm bảng **Theo quốc gia**.
+
+- Dữ liệu: **DB-IP Lite** (miễn phí, CC BY 4.0 - <https://db-ip.com>), tra cứu **ngay trên máy web**, không gửi IP ra ngoài.
+- Web tự tải về `data/geoip/` khi khởi động và mỗi tháng (~30 MB). Máy web cần ra được `https://download.db-ip.com`.
+  Tải lại tay: **Cài đặt → Thông tin → Tải lại dữ liệu GeoIP**. Không muốn web tự tải: `"geoip_download": false` trong `config.json`
+  (rồi tự chép 2 file `dbip-country-lite.csv.gz`, `dbip-asn-lite.csv.gz` vào `data/geoip/`).
+- IP của Cloudflare WARP / VPN / proxy hiện nước của nhà cung cấp đó, không phải nước người dùng.
+
+### 35.2. Chi tiết 1 IP
+
+Bấm vào IP ở bất kỳ đâu: quốc gia, nhà mạng, lần đầu / cuối, BMC đã mở, người dùng dùng IP đó, lượt bị chặn (lý do),
+quy tắc đang áp dụng, 30 lần mở gần nhất. Nút **Chặn IP này / Cho phép IP này** (cần quyền chặn / cho phép IP), **Xem ở trang Truy cập**.
+
+### 35.3. Prometheus + Grafana
+
+1. Đặt token trong `/opt/bmcproxy/config.json`: `"metrics_token": "<chuỗi ngẫu nhiên dài>"` (`openssl rand -hex 24`),
+   rồi `systemctl restart bmcproxy`. Chưa có `metrics_token` thì dùng chung `zabbix_token`.
+2. Prometheus: thêm job trong `deploy/grafana/prometheus-scrape.yml` (header `Authorization: Bearer <metrics_token>`,
+   đường dẫn `/api/metrics`, quét 30 giây).
+3. Grafana: **Dashboards → New → Import** → chọn `deploy/grafana/bmcproxy-dashboard.json` → chọn nguồn Prometheus.
+
+Metric chính (tiền tố `bmcproxy_`):
+
+| Metric | Ý nghĩa |
+|---|---|
+| `site_online{site,label}` | agent site đang kết nối (1/0) |
+| `site_pending`, `site_agent_outdated` | site chưa Áp dụng / agent cũ |
+| `bmc_up{site,port}`, `bmc_latency_ms` | server site mở được TCP tới BMC, thời gian (ms) |
+| `bmc_info{site,port,note,auth,template}` | thông tin BMC (ghép bảng bằng `on(site,port) group_left(note)`) |
+| `bmc_auth_enabled` | BMC bật xác thực |
+| `auth_requests_total{site,port,result}` | counter request agent kiểm tra: `ok`, `deny`, `error`, `open` (BMC tắt xác thực) |
+| `access_24h{site,kind}`, `access_country_24h{country}` | lượt mở BMC 24 giờ qua, theo quốc gia (`LAN`, `ZZ` = chưa rõ) |
+| `access_ips_24h`, `access_users_24h` | số IP / người dùng 24 giờ qua |
+| `denied_24h{site,reason}`, `denied_ips_24h` | request bị từ chối 24 giờ qua |
+| `ip_rules{action}`, `guest_links_active`, `sessions_active`, `geoip_ready` | quy tắc IP, link khách, phiên web, GeoIP |
+
+Quản trị đang đăng nhập web cũng mở được `/api/metrics` trên trình duyệt để xem thử.

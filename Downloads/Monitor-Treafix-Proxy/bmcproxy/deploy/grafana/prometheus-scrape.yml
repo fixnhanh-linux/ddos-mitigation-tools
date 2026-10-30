@@ -1,0 +1,12 @@
+# Them vao prometheus.yml (scrape_configs). Token = metrics_token trong /opt/bmcproxy/config.json
+- job_name: bmcproxy
+  scheme: https
+  metrics_path: /api/metrics          # web chay sau duong dan rieng (web_path) thi them vao truoc, vd /bmc/api/metrics
+  scrape_interval: 30s
+  tls_config:
+    insecure_skip_verify: true        # web dung chung chi tu ky
+  authorization:
+    type: Bearer
+    credentials: "<metrics_token>"
+  static_configs:
+    - targets: ["10.16.16.52:9443"]

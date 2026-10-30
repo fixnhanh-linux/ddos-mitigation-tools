@@ -27,10 +27,10 @@ from gw_common import VERSION  # noqa: E402
 COMMON = ["bmcproxy.py", "common/gw_common.py", "deploy/install.sh", "docs/HUONG-DAN-CAI-DAT.md"]
 PACKAGES = {
     "web": {
-        "files": COMMON + ["controller/gw_controller.py", "controller/gw_db.py", "controller/gw_ldap.py", "controller/gw_notify.py",
+        "files": COMMON + ["controller/gw_controller.py", "controller/gw_db.py", "controller/gw_geoip.py", "controller/gw_ldap.py", "controller/gw_notify.py",
                            "controller/gw_templates.py", "common/gw_render.py", "common/gw_auth.py",
                            "deploy/systemd/bmcproxy.service", "deploy/config.example.json"],
-        "dirs": {"controller/web": "web"},
+        "dirs": {"controller/web": "web", "deploy/grafana": "grafana"},
         "readme": """Treafix Proxy BB {v} - GOI WEB (frontend, server quan ly)
 
 Cai tren server web:

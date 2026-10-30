@@ -22,10 +22,11 @@ import time
 import traceback
 import urllib.parse
 
+import gw_geoip
 import gw_ldap
 import gw_notify
 from gw_auth import ThreadingServer
-from gw_common import (BMC_DEFAULTS, no_accent, bmc_ports, parse_tcp_ports, DASHBOARD_DEFAULTS, OVERRIDABLE, apr1_hash, validate_dashboard, RE_DOMAIN, RE_IP, RE_SITE_KEY, RE_USER, ROLES, PERMS, ROLE_PERMS, user_perms,
+from gw_common import (BMC_DEFAULTS, BUILD, no_accent, bmc_ports, parse_tcp_ports, DASHBOARD_DEFAULTS, OVERRIDABLE, apr1_hash, validate_dashboard, RE_DOMAIN, RE_IP, RE_SITE_KEY, RE_USER, ROLES, PERMS, ROLE_PERMS, user_perms,
                        SETTINGS_DEFAULTS, VERSION, GUEST_PATH, ValidationError, cert_info, check_password, totp_check, totp_new_secret, totp_uri,
                        clean_text, hash_password, hash_token, now_iso, read_json, to_port,
                        validate_bmc_fields, validate_settings_values, write_json)
@@ -608,15 +609,17 @@ class Store:
             except Exception as e:
                 self.db_error = f"{type(e).__name__}: {e}"
 
-    def read_access(self, limit=1000, site="", port=0):
+    def read_access(self, limit=1000, site="", port=0, keep_ip=""):
         if self.db:
             try:
-                return self.db.access_read(limit, site, port)
+                rows = self.db.access_read(limit if not keep_ip else limit * 10, site, port)
+                return [r for r in rows if r.get("ip") == keep_ip][:limit] if keep_ip else rows
             except Exception as e:
                 self.db_error = f"{type(e).__name__}: {e}"
         return self.read_log("access.log", limit,
-                             (lambda r: (not site or r.get("site") == site) and (not port or r.get("port") == port))
-                             if site or port else None)
+                             (lambda r: (not site or r.get("site") == site) and (not port or r.get("port") == port)
+                              and (not keep_ip or r.get("ip") == keep_ip))
+                             if site or port or keep_ip else None)
 
     def read_audit(self, limit=500):
         if self.db:
@@ -683,6 +686,8 @@ class App:
     def __init__(self, store):
         self.store = store
         self.notifier = gw_notify.Notifier(lambda: self.store.notify, self.notify_snapshot, self._notify_result)
+        self.geo = gw_geoip.GeoIP(store.dir, log=lambda m: print(m, flush=True))  # IP -> quoc gia + nha mang (offline)
+        self._metrics = (0, b"")
         self.hb = {}            # site -> heartbeat moi nhat (bo nho)
         self.commands = {}      # site -> [lenh cho agent]
         self.extra = {}         # site -> {"logs"|"diag"|"action": ket qua agent gui ve}
@@ -936,7 +941,16 @@ class App:
         for b in top_bmcs:
             b["note"] = notes.get((b["site"], b["port"]), "")
         top_users = [{**x, "ips": len(x["ips"])} for x in sorted(user_n.values(), key=lambda x: -x["count"])[:8]]
-        top_ips = [{**x, "bmcs": len(x["bmcs"])} for x in sorted(ip_n.values(), key=lambda x: -x["count"])[:8]]
+        top_ips = [{**x, "bmcs": len(x["bmcs"]), "geo": self.geo.lookup(x["ip"])}
+                   for x in sorted(ip_n.values(), key=lambda x: -x["count"])[:8]]
+        countries = {}
+        for x in ip_n.values():
+            g = self.geo.lookup(x["ip"])
+            key = g["cc"] or ("LAN" if g["scope"] == "private" else "ZZ")
+            c = countries.setdefault(key, {"cc": key, "country": g["country"] or ("Nội bộ" if key == "LAN" else "Không rõ"),
+                                           "count": 0, "ips": 0})
+            c["count"] += x["count"]
+            c["ips"] += 1
         blocked = {"total": 0, "ips": 0, "top": None}
         if self.can(u, "stats"):
             agg = {}
@@ -957,6 +971,7 @@ class App:
                 "total": sum(x["web"] + x["console"] + x["guest"] for x in rows),
                 "users": len(user_n), "ips": len(ip_n), "top_bmcs": top_bmcs, "top_users": top_users, "top_ips": top_ips,
                 "by_site": sorted(({"site": k, "count": v} for k, v in site_n.items()), key=lambda x: -x["count"]),
+                "by_country": sorted(countries.values(), key=lambda x: -x["count"]), "geo_ready": self.geo.status()["ready"],
                 "heat": [{"date": d, "hours": heat[d]} for d in heat_days], "blocked": blocked,
                 "guests": sorted(guests, key=lambda g: g["expires"])[:5], "guests_active": len(guests), "maint": maint}
 
@@ -1011,6 +1026,88 @@ class App:
         return out
 
     # ------------------------------------------------------------ link tam cho khach
+    def metrics_text(self):
+        """Noi dung Prometheus (text exposition 0.0.4)."""
+        st = self.store
+        esc = lambda v: str(v).replace("\\", "\\\\").replace("\n", " ").replace('"', '\\"')[:120]
+        lines = []
+
+        def metric(name, kind, help_, rows):
+            lines.append(f"# HELP bmcproxy_{name} {help_}")
+            lines.append(f"# TYPE bmcproxy_{name} {kind}")
+            for labels, val in rows:
+                lab = ",".join(f'{k}="{esc(v)}"' for k, v in labels.items())
+                lines.append(f"bmcproxy_{name}{{{lab}}} {val}" if lab else f"bmcproxy_{name} {val}")
+
+        admin = {"role": "admin", "sites": [], "name": "metrics", "perms": list(PERMS)}
+        sites = [self.site_status(k) for k in sorted(st.sites)]
+        metric("info", "gauge", "Phien ban web", [({"version": VERSION, "build": BUILD}, 1)])
+        metric("site_online", "gauge", "Agent cua site dang ket noi web (1/0)",
+               [({"site": x["key"], "label": x["label"]}, int(x["online"])) for x in sites])
+        metric("site_pending", "gauge", "Site co thay doi chua ap dung (1/0)",
+               [({"site": x["key"]}, int(x["phase"] in ("pending", "failed"))) for x in sites])
+        metric("site_agent_outdated", "gauge", "Agent cua site khac ban goi agent tren web (1/0)",
+               [({"site": x["key"]}, int(bool(x.get("agent_pkg_build")) and x.get("agent_build") != x.get("agent_pkg_build")))
+                for x in sites])
+        views = self.bmc_views(admin)
+        on = [v for v in views if v["enabled"]]
+        metric("bmc_info", "gauge", "Thong tin BMC (luon 1)",
+               [({"site": v["site"], "port": v["port"], "note": v.get("note", ""), "auth": int(v["auth"]),
+                  "template": v.get("template", "")}, 1) for v in on])
+        up = [(v, (v.get("health") or {}).get("web") or {}) for v in on]
+        metric("bmc_up", "gauge", "Server site mo duoc TCP toi BMC (1/0)",
+               [({"site": v["site"], "port": v["port"]}, int(bool(h.get("up")))) for v, h in up if h])
+        metric("bmc_latency_ms", "gauge", "Thoi gian ket noi TCP toi BMC (ms)",
+               [({"site": v["site"], "port": v["port"]}, h["ms"]) for v, h in up if h.get("up") and h.get("ms") is not None])
+        metric("bmc_auth_enabled", "gauge", "BMC bat xac thuc web (1/0)",
+               [({"site": v["site"], "port": v["port"]}, int(v["auth"])) for v in on])
+        auth_rows = []
+        for v in on:
+            s_ = v.get("auth_stats") or {}
+            for k in ("ok", "deny", "error", "open"):
+                if s_.get(k):
+                    auth_rows.append(({"site": v["site"], "port": v["port"], "result": k}, s_[k]))
+        metric("auth_requests_total", "counter", "So request agent da kiem tra (dem tu luc agent khoi dong)", auth_rows)
+        since = (dt.datetime.now() - dt.timedelta(hours=24)).isoformat()
+        acc, ctry, ips, users = {}, {}, set(), set()
+        for r in st.read_access(20000):
+            if r.get("ts", "") < since or r.get("kind") == "guest-open":
+                continue
+            k = (r.get("site", ""), r.get("kind", "web"))
+            acc[k] = acc.get(k, 0) + 1
+            g = self.geo.lookup(r.get("ip", ""))
+            cc = g["cc"] or ("LAN" if g["scope"] == "private" else "ZZ")
+            ctry[cc] = ctry.get(cc, 0) + 1
+            ips.add(r.get("ip", ""))
+            users.add(r.get("user", ""))
+        metric("access_24h", "gauge", "Luot mo BMC 24 gio qua (1 nguoi + IP + BMC / 30 phut)",
+               [({"site": k[0], "kind": k[1]}, v) for k, v in sorted(acc.items())])
+        metric("access_country_24h", "gauge", "Luot mo BMC 24 gio qua theo quoc gia cua IP",
+               [({"country": k}, v) for k, v in sorted(ctry.items())])
+        metric("access_ips_24h", "gauge", "So IP khac nhau mo BMC 24 gio qua", [({}, len(ips))])
+        metric("access_users_24h", "gauge", "So nguoi dung khac nhau mo BMC 24 gio qua", [({}, len(users))])
+        den = {}
+        dips = set()
+        for r in st.read_denied(limit=20000, days=1):
+            if r.get("ts", "") < since:
+                continue
+            k = (r.get("site", ""), r.get("reason", "other"))
+            den[k] = den.get(k, 0) + int(r.get("count") or 1)
+            dips.add(r.get("ip", ""))
+        metric("denied_24h", "gauge", "Request bi tu choi 24 gio qua",
+               [({"site": k[0], "reason": k[1]}, v) for k, v in sorted(den.items())])
+        metric("denied_ips_24h", "gauge", "So IP bi tu choi 24 gio qua", [({}, len(dips))])
+        now = time.time()
+        live = [r for r in st.iprules.values() if not r.get("exp") or r["exp"] > now]
+        metric("ip_rules", "gauge", "Quy tac IP dang ap dung",
+               [({"action": a}, sum(1 for r in live if r["action"] == a)) for a in ("block", "allow")])
+        metric("guest_links_active", "gauge", "Link khach con han",
+               [({}, sum(1 for g in st.guests.values() if not g.get("revoked") and g["exp"] > now))])
+        metric("sessions_active", "gauge", "Phien dang nhap web dang mo", [({}, len(self.sessions))])
+        g = self.geo.status()
+        metric("geoip_ready", "gauge", "Da nap du lieu GeoIP (1/0)", [({}, int(g["ready"]))])
+        return "\n".join(lines) + "\n"
+
     def site_ip_rules(self, site):
         """Quy tac chan / cho phep IP con han cua site -> gui xuong agent."""
         now = time.time()
@@ -1493,7 +1590,7 @@ def make_handler(app):
                     return
                 if path.startswith(wp + "/"):
                     path = path[len(wp):]
-                elif not (path.startswith(("/agent/v1/", "/install/")) or path == "/api/zabbix"):
+                elif not (path.startswith(("/agent/v1/", "/install/")) or path in ("/api/zabbix", "/api/metrics")):
                     return self.send(404, b"Not found", "text/plain; charset=utf-8")
             try:
                 st.refresh()
@@ -1518,6 +1615,8 @@ def make_handler(app):
                 m = re.match(r"^/install/([A-Za-z0-9_-]{20,64})(/agent\.zip)?$", path)
                 if m and method == "GET":
                     return self.install_get(m.group(1), bool(m.group(2)))
+                if path == "/api/metrics" and method == "GET":
+                    return self.api_metrics()
                 if path == "/api/zabbix" and method == "GET":
                     return self.api_zabbix()
                 if path == "/api/login" and method == "POST":
@@ -1878,6 +1977,7 @@ def make_handler(app):
             rows = sorted(agg.values(), key=lambda a: (-a["count"], a["last"]))[:1000]
             for a in rows:
                 a["note"] = notes.get((a["site"], a["port"]), "")
+                a["geo"] = app.geo.lookup(a["ip"])
                 a["rule"] = next((app.iprule_view(i, x)["action"] for i, x in st.iprules.items() if x["site"] == a["site"]
                                   and (not x.get("port") or x["port"] == a["port"]) and ip_in(a["ip"], x["cidr"])
                                   and (not x.get("exp") or x["exp"] > time.time())), "")
@@ -2085,6 +2185,57 @@ def make_handler(app):
                                        "role": role, "sites": sites, "verdict": verdict})
             return self.err(404, "Không tìm thấy API")
 
+        def ip_info(self, u, ip):
+            """Chi tiet 1 IP: quoc gia / nha mang, lan mo BMC, bi chan, quy tac dang ap dung."""
+            app.need(u, "stats")
+            ip = ip.strip()
+            try:
+                ipaddress.ip_address(ip)
+            except ValueError:
+                raise ValidationError("IP không hợp lệ")
+            notes = {bmc_key(b): b.get("note", "") for b in st.bmcs}
+            since = (dt.datetime.now() - dt.timedelta(days=30)).isoformat()
+            acc = [r for r in st.read_access(3000, keep_ip=ip) if r.get("ts", "") >= since and app.can_view(u, r.get("site", ""))]
+            for r in acc:
+                r["note"] = notes.get((r.get("site"), r.get("port")), "")
+            bmcs, users = {}, {}
+            for r in acc:
+                k = (r["site"], r["port"])
+                b = bmcs.setdefault(k, {"site": k[0], "port": k[1], "note": r["note"], "count": 0, "last": ""})
+                b["count"] += 1
+                b["last"] = max(b["last"], r["ts"])
+                users[r.get("user", "")] = users.get(r.get("user", ""), 0) + 1
+            den = {}
+            for r in st.read_denied(limit=20000, days=30):
+                if r.get("ip") != ip or not app.can_view(u, r.get("site", "")):
+                    continue
+                k = (r["site"], r["port"])
+                d = den.setdefault(k, {"site": k[0], "port": k[1], "note": notes.get(k, ""), "count": 0, "reasons": {},
+                                       "last": ""})
+                d["count"] += r["count"]
+                d["reasons"][r["reason"]] = d["reasons"].get(r["reason"], 0) + r["count"]
+                d["last"] = max(d["last"], r["ts"])
+            rules = [app.iprule_view(i, x) for i, x in st.iprules.items() if ip_in(ip, x["cidr"]) and app.can_view(u, x["site"])]
+            return {"ip": ip, "geo": app.geo.lookup(ip), "access": acc[:200], "access_total": len(acc),
+                    "first": min((r["ts"] for r in acc), default=""), "last": max((r["ts"] for r in acc), default=""),
+                    "bmcs": sorted(bmcs.values(), key=lambda x: -x["count"]),
+                    "users": sorted(({"user": k, "count": v} for k, v in users.items()), key=lambda x: -x["count"]),
+                    "denied": sorted(den.values(), key=lambda x: -x["count"]), "denied_total": sum(d["count"] for d in den.values()),
+                    "rules": rules}
+
+        def api_metrics(self):
+            """Prometheus / Grafana: GET /api/metrics, header Authorization: Bearer <metrics_token> (hoac X-Api-Token)."""
+            token = st.cfg.get("metrics_token") or st.cfg.get("zabbix_token") or ""
+            given = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip() or self.headers.get("X-Api-Token") or ""
+            name = app.session_user(self.cookie_token())
+            if not ((token and hmac.compare_digest(token, given)) or (name and app.user(name)["role"] == "admin")):
+                return self.err(401, "Sai token (đặt metrics_token trong config.json)")
+            ts, body = app._metrics
+            if time.time() - ts > 15:  # Prometheus quet 15-60 giay: tinh lai toi da 1 lan / 15 giay
+                body = app.metrics_text().encode("utf-8")
+                app._metrics = (time.time(), body)
+            return self.send(200, body, "text/plain; version=0.0.4; charset=utf-8")
+
         def api_zabbix(self):
             token = st.cfg.get("zabbix_token") or ""
             given = self.headers.get("X-Api-Token") or ""
@@ -2162,7 +2313,18 @@ def make_handler(app):
                 notes = {(b["site"], b["port"]): b.get("note", "") for b in st.bmcs}
                 for r in rows:
                     r["note"] = notes.get((r.get("site"), r.get("port")), "")
+                    r["geo"] = app.geo.lookup(r.get("ip", ""))
                 return self.send(200, rows)
+            if res == "ipinfo" and method == "GET":
+                return self.send(200, self.ip_info(u, (self.query.get("ip") or [""])[0]))
+            if res == "geoip":
+                if method == "GET":
+                    return self.send(200, app.geo.status())
+                if method == "POST":
+                    app.need_admin(u)
+                    msg = app.geo.download()
+                    st.audit(u["name"], "geoip-update", msg)
+                    return self.send(200, {**app.geo.status(), "message": msg})
             if res == "notify":
                 app.need_admin(u)
                 if method == "GET":
@@ -2227,6 +2389,8 @@ def make_handler(app):
                 if method == "GET":
                     return self.send(200, {"settings": st.settings, "overridable": OVERRIDABLE,
                                            "zabbix_enabled": bool(st.cfg.get("zabbix_token")),
+                                           "metrics_enabled": bool(st.cfg.get("metrics_token") or st.cfg.get("zabbix_token")),
+                                           "geoip": app.geo.status(),
                                            "offline_after": st.cfg["agent_offline_after"],
                                            "storage": st.storage_info() if u["role"] == "admin" else None,
                                            "version": VERSION})
@@ -2987,6 +3151,8 @@ def serve(store):
     cfg = store.cfg
     app = App(store)
     app.notifier.start()
+    # GeoIP: nap du lieu co san + tu tai ban moi hang thang (tat: "geoip_download": false trong config.json)
+    app.geo.start(auto_download=cfg.get("geoip_download", True) and os.environ.get("BMCPROXY_NO_GEOIP_DOWNLOAD") != "1")
     httpd = ThreadingServer((cfg["listen_host"], cfg["listen_port"]), make_handler(app))
     httpd.ssl_ctx = None
     scheme = "http"

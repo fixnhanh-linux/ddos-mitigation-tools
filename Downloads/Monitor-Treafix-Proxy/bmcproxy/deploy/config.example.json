@@ -6,5 +6,7 @@
   "data_dir": "data",
   "backup_dir": "backups",
   "zabbix_token": "",
+  "metrics_token": "",
+  "geoip_download": true,
   "agent_offline_after": 45
 }
