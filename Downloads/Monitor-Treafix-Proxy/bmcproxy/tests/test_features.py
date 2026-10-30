@@ -292,7 +292,12 @@ class SiteTest(unittest.TestCase):
         before = self.st.sites["hcm"]["token_hash"]
         s, _, r = req(self.port, "POST", "/api/sites/hcm/install", {"mode": "update"}, self.ck)
         self.assertEqual(s, 200, r)
-        s, _, body = req(self.port, "GET", r["path"], None)
+        # xem truoc link (WhatsApp / Zalo / trinh duyet) khong dung mat ma
+        s, _, body = req(self.port, "GET", r["path"], None, {"User-Agent": "WhatsApp/2.23"})
+        self.assertEqual(s, 200)
+        self.assertNotIn(b"install.sh", body if isinstance(body, bytes) else str(body).encode())
+        curl = {"User-Agent": "curl/8.5.0"}
+        s, _, body = req(self.port, "GET", r["path"], None, curl)
         if s == 503:
             self.skipTest("chưa build gói agent (tools/build_packages.py)")
         text = body.decode() if isinstance(body, bytes) else str(body)
@@ -301,7 +306,7 @@ class SiteTest(unittest.TestCase):
         self.assertNotIn("agent.json <<", text)
         self.assertNotIn("FORCE_AGENT_JSON", text)
         self.assertEqual(self.st.sites["hcm"]["token_hash"], before)
-        self.assertEqual(req(self.port, "GET", r["path"], None)[0], 410)  # ma dung 1 lan
+        self.assertEqual(req(self.port, "GET", r["path"], None, curl)[0], 410)  # ma dung 1 lan
 
     def test_ip_rules_and_blocked_log(self):
         from gw_auth import AuthGateway

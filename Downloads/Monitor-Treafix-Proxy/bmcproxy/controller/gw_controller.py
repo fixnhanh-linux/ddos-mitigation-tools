@@ -2410,6 +2410,11 @@ def make_handler(app):
                     return self.err(404, "Web chưa có gói agent (cài web bằng gói bmc-gateway-web mới)")
                 with open(pkg, "rb") as f:
                     return self.send(200, f.read(), "application/zip")
+            ua = (self.headers.get("User-Agent") or "").lower()
+            if not ua.startswith(("curl/", "wget/")):
+                # xem truoc link (Zalo, WhatsApp, Telegram, trinh duyet...) khong duoc dung mat ma 1 lan
+                body = "# Lenh cai / cap nhat agent: chay tren server bang curl, vd:\n#   curl -fsSk <link nay> | sudo bash\n"
+                return self.send(200, body.encode(), "text/plain; charset=utf-8")
             if not rec or rec["used_at"] or now > rec["exp"]:
                 body = "echo 'LOI: ma cai da dung hoac het han - tao lenh moi tren web: Site -> Cai agent' >&2; exit 1\n"
                 return self.send(410, body.encode(), "text/x-shellscript; charset=utf-8")
