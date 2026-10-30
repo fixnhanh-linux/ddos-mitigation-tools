@@ -1572,7 +1572,7 @@ function editUser(u) {
       options: state.sites.map((s) => [s.key, s.label])
     },
     { type: "html", html: permBox(u ? u.role : "operator", u ? u.perms : ROLE_PERMS.operator) },
-    { type: "html", html: '<p class="hint"><b>Khách hàng</b>: chỉ thấy trang "BMC của tôi" với các BMC theo nhãn / danh sách dưới đây, tự mở BMC (link 4 giờ), không thấy site hay cài đặt.</p>' },
+    { type: "html", html: '<p class="hint" id="cust-hint"><b>Khách hàng</b>: chỉ thấy trang "BMC của tôi" với các BMC theo nhãn / danh sách dưới đây, tự mở BMC (link 4 giờ), không thấy site hay cài đặt.</p>' },
     { name: "bmc_tags", label: "Khách hàng · nhãn BMC (cách nhau dấu phẩy)", value: u ? (u.bmc_tags || []).join(", ") : "", placeholder: "KH-ABC", span: false },
     { name: "bmc_list", label: "Khách hàng · BMC cụ thể (site:cổng)", value: u ? (u.bmc_list || []).join(" ") : "", placeholder: "hcm:8001 hcm:8005", span: false },
     { name: "full_name", label: "Họ tên", value: u ? u.full_name : "", span: false },
@@ -1598,28 +1598,65 @@ function editUser(u) {
     loadUsers();
   });
   const role = $("#gen-form").elements.role;
-  role.addEventListener("change", () => setPermBox(role.value, ROLE_PERMS[role.value] || []));
+  role.addEventListener("change", () => { setPermBox(role.value, ROLE_PERMS[role.value] || []); syncUserForm(role.value); });
+  syncUserForm(role.value);
+  refreshPermBox();
 }
 
 // Quyen chi tiet trong form tai khoan: chi Van hanh / Chi xem (Quan tri = moi quyen, Khach hang = cong rieng)
 function permBox(role, perms) {
+  const has = (k) => (perms || []).includes(k);
   return `<div id="perm-box" class="perm-box${ROLE_PERMS[role] ? "" : " hidden"}">
-    <div class="perm-head"><b>Quyền chi tiết</b><span class="hint">trong phạm vi site đã chọn · tick theo vai trò, sửa thêm / bớt từng quyền</span>
-      <button type="button" class="btn small ghost" data-perm-reset>Mặc định theo vai trò</button></div>
-    <div class="perm-groups">${PERM_GROUPS.map(([g, ks]) => `<div class="perm-group"><div class="perm-gname">${g}</div>${ks.map((k) =>
-      `<label><input type="checkbox" value="${k}"${(perms || []).includes(k) ? " checked" : ""}> ${esc(PERM_LABEL[k])}</label>`).join("")}</div>`).join("")}</div>
+    <div class="perm-head">
+      <div><div class="perm-title">Quyền chi tiết <span class="tag" data-perm-count></span></div>
+        <div class="hint">Chỉ có hiệu lực ở các site trong phạm vi. Tick thêm / bỏ bớt so với vai trò.</div></div>
+      <button type="button" class="btn small" data-perm-reset>Mặc định theo vai trò</button>
+    </div>
+    <div class="perm-groups">${PERM_GROUPS.map(([g, ks]) => `<div class="perm-group" data-perm-group>
+      <div class="perm-ghead"><span class="perm-gname">${g}</span>
+        <button type="button" class="perm-all" data-perm-all title="Chọn / bỏ cả nhóm"></button></div>
+      ${ks.map((k) => `<label class="perm-item"><input type="checkbox" value="${k}"${has(k) ? " checked" : ""}><span>${esc(PERM_LABEL[k])}</span></label>`).join("")}
+    </div>`).join("")}</div>
   </div>`;
+}
+function refreshPermBox() {
+  const box = $("#perm-box");
+  if (!box) return;
+  const all = $$("input", box);
+  $("[data-perm-count]", box).textContent = `${all.filter((i) => i.checked).length}/${all.length}`;
+  $$("[data-perm-group]", box).forEach((g) => {
+    const ins = $$("input", g), on = ins.filter((i) => i.checked).length;
+    $("[data-perm-all]", g).textContent = on === ins.length ? "Bỏ hết" : "Chọn hết";
+    $(".perm-gname", g).dataset.count = `${on}/${ins.length}`;
+  });
 }
 function setPermBox(role, perms) {
   const box = $("#perm-box");
   box.classList.toggle("hidden", !ROLE_PERMS[role]);
   $$("input", box).forEach((i) => { i.checked = perms.includes(i.value); });
+  refreshPermBox();
+}
+// Form tai khoan: chi hien o dung voi vai tro (pham vi site / quyen / o khach hang)
+function syncUserForm(role) {
+  const form = $("#gen-form");
+  const show = (el, on) => el && el.classList.toggle("hidden", !on);
+  show($('[data-checks="sites"]', form)?.closest(".span-2"), role === "operator" || role === "viewer");
+  show($("#cust-hint", form)?.closest(".span-2"), role === "customer");
+  ["bmc_tags", "bmc_list"].forEach((n) => show(form.elements[n]?.closest("label"), role === "customer"));
 }
 $("#gen-body").addEventListener("click", (e) => {
+  const all = e.target.closest("[data-perm-all]");
+  if (all) {
+    const ins = $$("input", all.closest("[data-perm-group]"));
+    const on = !ins.every((i) => i.checked);
+    ins.forEach((i) => { i.checked = on; });
+    return refreshPermBox();
+  }
   if (!e.target.closest("[data-perm-reset]")) return;
   const role = $("#gen-form").elements.role.value;
   setPermBox(role, ROLE_PERMS[role] || []);
 });
+$("#gen-body").addEventListener("change", (e) => { if (e.target.closest("#perm-box")) refreshPermBox(); });
 function permSummary(u) {
   if (!ROLE_PERMS[u.role]) return "";
   const n = (u.perms || []).length, all = Object.keys(PERM_LABEL).length;
