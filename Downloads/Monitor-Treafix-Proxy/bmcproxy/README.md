@@ -37,7 +37,7 @@ Cổng truy cập BMC / IPMI (iDRAC, iLO, AMI, Supermicro…) cho **nhiều site
 | Console Java | Chuyển tiếp TCP thô (cổng proxy → cổng BMC) cho console Java, giới hạn IP; agent tự sửa file `.jnlp` (IP nội bộ → tên miền proxy, cổng BMC → cổng proxy); file `.jar` tải không cần cookie. Có sẵn cổng Java cho QCT/AMI, iDRAC 6/7/8, iLO 4, Supermicro |
 | Áp dụng | Diff từng file theo site. Chọn site để áp dụng. Theo dõi tiến độ trực tiếp. Thử lại khi lỗi. Kiểm tra cổng trống trước khi restart. Tự rollback |
 | Bảo mật | Xác thực bật sẵn cho web + console. Target bắt buộc theo BMC. Chặn giả mạo header `Token-*`. TLS ≥ 1.2. Mật khẩu PBKDF2, khoá khi sai 5 lần, chống CSRF, CSP |
-| Phân quyền | **Quản trị**: toàn quyền. **Vận hành**: sửa BMC và áp dụng cho site được giao. **Chỉ xem**: chỉ xem site được giao |
+| Phân quyền | **Quản trị**: toàn quyền. **Vận hành** / **Chỉ xem**: theo site được giao, tick từng quyền (thêm / sửa / xoá BMC, áp dụng, dò, bảo trì, link khách, thống kê, nhật ký, xuất CSV) |
 | Giám sát | Tổng quan 4 site. BMC mất kết nối (kiểm tra từ chính server của site). Lượt xác thực / bị chặn. Cảnh báo chứng chỉ, nginx chiếm cổng, agent mất liên lạc. API Zabbix |
 | Sao lưu | Web: danh sách BMC, site, cài đặt. Mỗi server: config Traefik trước mỗi lần áp dụng (giữ 30 bản) |
 | Cảnh báo | Telegram / email: site mất liên lạc, BMC mất kết nối, BMC sắp hết hạn, áp dụng lỗi, khoá tài khoản, cập nhật agent |

@@ -921,6 +921,30 @@ Web → **Người dùng** (chỉ quản trị). Mỗi tài khoản có:
 
 Quản trị viên không tự khoá, tự cho hết hạn, tự xoá, hay tự bỏ quyền quản trị của chính mình được.
 
+### Quyền chi tiết
+
+Vai trò là bộ quyền mặc định. Với **Vận hành** và **Chỉ xem**, bấm **Sửa** → khung **Quyền chi tiết** để tick thêm / bỏ bớt từng quyền.
+Quyền chỉ có hiệu lực ở các site trong **Phạm vi site** (để trống = mọi site).
+
+| Nhóm | Quyền | Vận hành | Chỉ xem |
+|---|---|---|---|
+| BMC | Thêm BMC (cả thêm hàng loạt, nút **Nhập nginx**) | ✓ | |
+| | Sửa BMC (cả thao tác hàng loạt: bật / tắt xác thực, Host, mẫu, nhãn, hạn) | ✓ | |
+| | Xoá BMC | ✓ | |
+| | Xuất CSV | ✓ | ✓ |
+| Site | Áp dụng / quay về bản cấu hình cũ | ✓ | |
+| | Dò BMC, **Kiểm tra**, **Kiểm tra BMC** | ✓ | |
+| | Đặt lịch bảo trì | ✓ | |
+| | Tạo / thu hồi link khách | ✓ | |
+| Xem | Thống kê & lịch sử truy cập BMC (trang **Truy cập**) | ✓ | |
+| | Nhật ký thao tác | ✓ | |
+
+- Bảng người dùng ghi số quyền (vd `7/10 quyền`), nhãn **tuỳ chỉnh** = đã sửa khác mặc định; rê chuột để xem danh sách.
+- Tick đúng bằng bộ mặc định = không lưu riêng (đổi vai trò sau này thì quyền theo vai trò mới). Nút **Mặc định theo vai trò** đặt lại.
+- Thao tác thiếu quyền: nút bị ẩn trên web, gọi API thẳng thì bị từ chối (403) kèm tên quyền thiếu.
+- Việc của quản trị (thêm / sửa site, token, cài / cập nhật agent, log server, sao lưu, người dùng, cài đặt) không giao theo quyền được.
+- Tài khoản AD: vai trò / site theo nhóm AD; quyền chi tiết sửa trên web được giữ khi vai trò không đổi.
+
 ### Xác thực 2 lớp (2FA)
 
 Mỗi người tự bật: **Cài đặt → Xác thực 2 lớp → Bật 2FA**.

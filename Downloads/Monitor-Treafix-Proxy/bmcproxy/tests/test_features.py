@@ -287,6 +287,44 @@ class SiteTest(unittest.TestCase):
         lst = req(self.port, "GET", "/api/guests", None, self.ck)[2]
         self.assertEqual(next(x for x in lst if x["id"] == g["id"])["status"], "revoked")
 
+    def test_fine_permissions(self):
+        # Van hanh chi duoc sua BMC + xuat CSV o site hcm: them / xoa / ap dung / xem nhat ky -> 403
+        pw = "P-" + secrets.token_hex(8)
+        s, _, r = req(self.port, "POST", "/api/users", {"name": "nv1", "password": pw, "role": "operator", "sites": ["hcm"],
+                                                         "perms": ["bmc_edit", "export", "khong-co"], "must_change": ""}, self.ck)
+        self.assertEqual(s, 201, r)
+        ck = {"Cookie": req(self.port, "POST", "/api/login", {"user": "nv1", "password": pw})[1]["Set-Cookie"].split(";")[0]}
+        self.assertEqual(req(self.port, "GET", "/api/me", None, ck)[2]["perms"], ["bmc_edit", "export"])
+        s, _, r = req(self.port, "PUT", "/api/bmcs/hcm/8001", {"note": "KH 1"}, ck)
+        self.assertEqual(s, 200, r)
+        self.assertEqual(req(self.port, "POST", "/api/bmcs", {"site": "hcm", "port": 8009, "upstream": "https://10.0.0.9"}, ck)[0], 403)
+        self.assertEqual(req(self.port, "DELETE", "/api/bmcs/hcm/8001", None, ck)[0], 403)
+        self.assertEqual(req(self.port, "POST", "/api/bmcs/batch", {"action": "delete", "keys": [{"site": "hcm", "port": 8001}]}, ck)[0], 403)
+        s, _, r = req(self.port, "POST", "/api/bmcs/batch", {"action": "set", "keys": [{"site": "hcm", "port": 8001}],
+                                                              "fields": {"tags": ["KH-1"]}}, ck)
+        self.assertEqual(s, 200, r)
+        self.assertEqual(req(self.port, "POST", "/api/apply", {"sites": ["hcm"]}, ck)[0], 403)
+        self.assertEqual(req(self.port, "POST", "/api/guests", {"site": "hcm", "port": 8001}, ck)[0], 403)
+        self.assertEqual(req(self.port, "POST", "/api/sites/hcm/command", {"name": "detect", "ip": "10.0.0.9"}, ck)[0], 403)
+        for path in ("/api/audit", "/api/stats", "/api/access"):
+            self.assertEqual(req(self.port, "GET", path, None, ck)[0], 403, path)
+        self.assertEqual(req(self.port, "GET", "/api/bmcs/export", None, ck)[0], 200)
+        users = {u["name"]: u for u in req(self.port, "GET", "/api/users", None, self.ck)[2]}
+        self.assertTrue(users["nv1"]["perms_custom"])
+        # tick lai dung bo mac dinh -> khong luu rieng; doi vai tro khong gui quyen -> theo vai tro moi
+        from gw_common import ROLE_PERMS
+        req(self.port, "PUT", "/api/users/nv1", {"role": "operator", "sites": ["hcm"], "perms": list(ROLE_PERMS["operator"])}, self.ck)
+        self.assertNotIn("perms", self.st.users["nv1"])
+        self.assertEqual(req(self.port, "POST", "/api/apply", {"sites": ["hcm"]}, ck)[0], 200)
+        req(self.port, "PUT", "/api/users/nv1", {"role": "viewer", "sites": ["hcm"]}, self.ck)
+        self.assertEqual(req(self.port, "GET", "/api/me", None, ck)[2]["perms"], ["export"])
+        self.assertEqual(req(self.port, "PUT", "/api/bmcs/hcm/8001", {"note": "KH 1"}, ck)[0], 403)
+        # Chi xem duoc cho them quyen xem nhat ky
+        req(self.port, "PUT", "/api/users/nv1", {"role": "viewer", "sites": ["hcm"], "perms": ["audit"]}, self.ck)
+        self.assertEqual(req(self.port, "GET", "/api/audit", None, ck)[0], 200)
+        self.assertEqual(req(self.port, "GET", "/api/bmcs/export", None, ck)[0], 403)
+        req(self.port, "DELETE", "/api/users/nv1", None, self.ck)
+
     def test_customer_portal(self):
         from gw_common import hash_password
         req(self.port, "POST", "/api/bmcs", {"site": "hcm", "port": 8005, "upstream": "https://10.0.0.6",

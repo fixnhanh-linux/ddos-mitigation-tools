@@ -49,7 +49,7 @@
         <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4m10 4v12m0 0l4-4m-4 4l-4-4"/></svg></span>
         <span class="nav-lbl">Traefik</span>
       </a>
-      <a href="#access" data-page="access" data-min-role="operator" title="Truy cập BMC" data-tip="Truy cập BMC">
+      <a href="#access" data-page="access" data-perm="stats" title="Truy cập BMC" data-tip="Truy cập BMC">
         <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
         <span class="nav-lbl">Truy cập BMC</span><span class="count" id="nav-guest-count"></span>
       </a>
@@ -67,7 +67,7 @@
         <span class="nav-lbl">Mẫu BMC</span>
       </a>
       <div class="nav-group nav-lbl">Hệ thống</div>
-      <a href="#audit" data-page="audit" data-min-role="operator" title="Nhật ký" data-tip="Nhật ký">
+      <a href="#audit" data-page="audit" data-perm="audit" title="Nhật ký" data-tip="Nhật ký">
         <span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
         <span class="nav-lbl">Nhật ký</span>
       </a>
@@ -289,7 +289,7 @@
           <tbody id="user-list"></tbody></table>
       </div></div>
       <div class="panel note">
-        <b>Quản trị</b>: toàn quyền. <b>Vận hành</b>: thêm/sửa BMC và áp dụng cho các site được giao. <b>Chỉ xem</b>: chỉ xem các site được giao. Để trống phạm vi = mọi site.
+        <b>Quản trị</b>: toàn quyền. <b>Vận hành</b>: mặc định đủ 10 quyền (thêm / sửa / xoá BMC, áp dụng, dò, bảo trì, link khách, xem thống kê, nhật ký, xuất CSV) ở các site được giao. <b>Chỉ xem</b>: xem + xuất CSV. Bấm <b>Sửa</b> → <b>Quyền chi tiết</b> để tick thêm / bỏ bớt từng quyền. Để trống phạm vi = mọi site.
         <br><b>Khoá</b> tài khoản hoặc đặt <b>ngày hết hạn</b> để tạm ngưng quyền (vd tài khoản nhà thầu). Đặt lại mật khẩu thì người dùng phải đổi mật khẩu ở lần đăng nhập sau.
         Mỗi người tự bật <b>xác thực 2 lớp</b> ở trang Cài đặt.
       </div>

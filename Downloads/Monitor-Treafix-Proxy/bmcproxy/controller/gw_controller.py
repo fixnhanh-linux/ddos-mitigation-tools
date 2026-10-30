@@ -25,7 +25,7 @@ import urllib.parse
 import gw_ldap
 import gw_notify
 from gw_auth import ThreadingServer
-from gw_common import (BMC_DEFAULTS, bmc_ports, parse_tcp_ports, DASHBOARD_DEFAULTS, OVERRIDABLE, apr1_hash, validate_dashboard, RE_DOMAIN, RE_IP, RE_SITE_KEY, RE_USER, ROLES,
+from gw_common import (BMC_DEFAULTS, bmc_ports, parse_tcp_ports, DASHBOARD_DEFAULTS, OVERRIDABLE, apr1_hash, validate_dashboard, RE_DOMAIN, RE_IP, RE_SITE_KEY, RE_USER, ROLES, PERMS, ROLE_PERMS, user_perms,
                        SETTINGS_DEFAULTS, VERSION, GUEST_PATH, ValidationError, cert_info, check_password, totp_check, totp_new_secret, totp_uri,
                        clean_text, hash_password, hash_token, now_iso, read_json, to_port,
                        validate_bmc_fields, validate_settings_values, write_json)
@@ -814,7 +814,7 @@ class App:
     # ------------------------------------------------------------ quyen
     def user(self, name):
         u = self.store.users[name]
-        return {"name": name, "role": u.get("role", "viewer"), "sites": u.get("sites") or [],
+        return {"name": name, "role": u.get("role", "viewer"), "sites": u.get("sites") or [], "perms": user_perms(u),
                 "full_name": u.get("full_name", ""), "must_change": bool(u.get("must_change")),
                 "totp": bool(u.get("totp_secret")), "source": u.get("source", "local"),
                 "bmc_tags": u.get("bmc_tags") or [], "bmc_list": u.get("bmc_list") or []}
@@ -825,12 +825,17 @@ class App:
             return False
         return u["role"] == "admin" or not u["sites"] or site in u["sites"]
 
-    def can_edit(self, u, site):
-        return u["role"] == "admin" or (u["role"] == "operator" and self.can_view(u, site))
+    def can(self, u, perm, site=None):
+        """Quyen chi tiet (PERMS); site=None: co quyen nay o it nhat 1 site trong pham vi."""
+        if u["role"] == "admin":
+            return True
+        if u["role"] == "customer" or perm not in u.get("perms", ()):
+            return False
+        return site is None or self.can_view(u, site)
 
-    def need_edit(self, u, site):
-        if not self.can_edit(u, site):
-            raise PermissionError(f"Bạn không có quyền sửa site {site}")
+    def need(self, u, perm, site=None):
+        if not self.can(u, perm, site):
+            raise PermissionError(f"Bạn không có quyền {PERMS[perm]}" + (f" ở site {site}" if site else ""))
 
     @staticmethod
     def need_admin(u):
@@ -1719,7 +1724,7 @@ def make_handler(app):
                 site = str(data.get("site", ""))
                 if site not in st.sites:
                     raise ValidationError("Không có site này")
-                app.need_edit(u, site)
+                app.need(u, "maint", site)
                 port = int(data.get("port") or 0)
                 if port and not st.get_bmc(site, port):
                     raise ValidationError(f"Site {site} không có BMC cổng {port}")
@@ -1749,7 +1754,7 @@ def make_handler(app):
                 m = st.maint.get(mid)
                 if not m:
                     return self.err(404, "Không có lịch này")
-                app.need_edit(u, m["site"])
+                app.need(u, "maint", m["site"])
                 with st.lock:
                     if m["start"] <= app._now_local() < m["end"]:  # dang dien ra -> ket thuc ngay (giu lich su)
                         m["end"] = app._now_local()
@@ -1774,7 +1779,7 @@ def make_handler(app):
                 site = str(data.get("site", ""))
                 if site not in st.sites:
                     raise ValidationError("Không có site này")
-                app.need_edit(u, site)
+                app.need(u, "guests", site)
                 port = to_port(data.get("port"), "Cổng")
                 b = st.get_bmc(site, port)
                 if not b:
@@ -1805,7 +1810,7 @@ def make_handler(app):
                 g = st.guests.get(gid)
                 if not g:
                     return self.err(404, "Không có link này")
-                app.need_edit(u, g["site"])
+                app.need(u, "guests", g["site"])
                 with st.lock:
                     g["revoked"], g["revoked_by"] = True, u["name"]
                     st.save("guests.json")
@@ -1957,12 +1962,10 @@ def make_handler(app):
             if res == "guests":
                 return self.api_guests(method, a1, u)
             if res == "stats" and method == "GET":
-                if u["role"] == "viewer":
-                    raise PermissionError("Không có quyền xem thống kê truy cập")
+                app.need(u, "stats")
                 return self.send(200, app.stats(u))
             if res == "access" and method == "GET":
-                if u["role"] == "viewer":
-                    raise PermissionError("Không có quyền xem lịch sử truy cập")
+                app.need(u, "stats")
                 site = (self.query.get("site") or [""])[0]
                 try:
                     port = int((self.query.get("port") or ["0"])[0] or 0)
@@ -2055,12 +2058,12 @@ def make_handler(app):
                 return self.send(200, self.warnings(u))
             if res == "apply" and method == "POST":
                 data = self.body_json()
-                sites = data.get("sites") or [k for k in app.visible_sites(u) if app.can_edit(u, k)]
+                sites = data.get("sites") or [k for k in app.visible_sites(u) if app.can(u, "apply", k)]
                 out = {}
                 for k in sites:
                     if k not in st.sites:
                         continue
-                    app.need_edit(u, k)
+                    app.need(u, "apply", k)
                     out[k] = app.release(k, u["name"], retry=bool(data.get("retry")))
                 return self.send(200, {"released": out})
             if res == "traefik" and method == "GET":
@@ -2076,8 +2079,7 @@ def make_handler(app):
                 if method == "POST" and a1 and a2 == "restore":
                     return self.send(200, app.restore(a1, u["name"]))
             if res == "audit" and method == "GET":
-                if u["role"] == "viewer":
-                    raise PermissionError("Không có quyền xem nhật ký")
+                app.need(u, "audit")
                 try:
                     limit = max(50, min(5000, int((self.query.get("limit") or ["2000"])[0])))
                 except ValueError:
@@ -2170,8 +2172,8 @@ def make_handler(app):
                     raise ValidationError("Lệnh không hợp lệ")
                 if name in ("clear_cache", "logs", "restart_traefik", "restart_agent", "update_agent"):
                     app.need_admin(u)
-                else:
-                    app.need_edit(u, key)
+                else:  # import = lay BMC dang chay tren Traefik ve web
+                    app.need(u, "bmc_add" if name == "import" else "detect", key)
                 cmd = {"name": name}
                 if name == "detect":  # do loai BMC theo IP (agent o cung mang BMC)
                     ip = str(cmd_body.get("ip", "")).strip()
@@ -2218,7 +2220,7 @@ def make_handler(app):
                                  "applied": h.get("rev") == applied, "desired": h.get("rev") == desired})
                 return self.send(200, {"rows": rows, "applied": applied, "desired": desired})
             if method == "POST" and action == "rollback":
-                app.need_edit(u, key)
+                app.need(u, "apply", key)
                 rev = str(self.body_json().get("rev", ""))
                 rel = st.load_release(key, rev)
                 if not rel:
@@ -2367,11 +2369,13 @@ def make_handler(app):
                     r = {"line": line, "site": row.get("site", ""), "port": row.get("port", "")}
                     try:
                         raw = row_to_bmc(row, tpls)
-                        app.need_edit(u, raw["site"])
+                        if not app.can_view(u, raw["site"]):
+                            raise PermissionError(f"Bạn không có quyền ở site {raw['site']}")
                         port = to_port(raw["port"], "Cổng")
                         cur = st.get_bmc(raw["site"], port)
                         if cur and not update:
                             raise ValidationError("BMC đã có (tick 'Cập nhật BMC đã có' để ghi đè)")
+                        app.need(u, "bmc_edit" if cur else "bmc_add", raw["site"])
                         b = app.validate_bmc({**(cur or {}), **raw}, (raw["site"], port) if cur else None)
                         ports = bmc_ports(b)
                         for pt in ports:
@@ -2416,7 +2420,7 @@ def make_handler(app):
                       if k in ("auth", "console_auth", "enabled", "legacy_tls", "jsesp_cache", "java_web", "max_conns",
                               "template", "tags", "expires", "host_header")}
             for site, _ in keys:
-                app.need_edit(u, site)
+                app.need(u, "bmc_delete" if action == "delete" else "bmc_edit", site)
             wanted = set(keys)
             done = 0
             with st.lock:
@@ -2461,10 +2465,11 @@ def make_handler(app):
                         and pat.search(str(a.get("detail", "")))][:60]
                 return self.send(200, rows)
             if method == "GET" and site == "export":
+                app.need(u, "export")
                 only = (self.query.get("site") or [""])[0]
                 rows = []
                 for b in app.bmc_views(u):
-                    if only and b["site"] != only:
+                    if (only and b["site"] != only) or not app.can(u, "export", b["site"]):
                         continue
                     host = st.sites.get(b["site"], {}).get("domain", "")
                     if host:
@@ -2480,7 +2485,7 @@ def make_handler(app):
                 return self.send(200, self.batch(u, self.body_json()))
             if method == "POST" and site is None:
                 data = self.body_json()
-                app.need_edit(u, str(data.get("site", "")))
+                app.need(u, "bmc_add", str(data.get("site", "")))
                 with st.lock:
                     b = app.validate_bmc(data)
                     b["updated_at"], b["updated_by"] = now_iso(), u["name"]
@@ -2489,7 +2494,7 @@ def make_handler(app):
                 st.audit(u["name"], "bmc-add", f"{b['port']} -> {b['upstream']}", b["site"])
                 return self.send(201, b)
             port = to_port(port, "Cổng")
-            app.need_edit(u, site)
+            app.need(u, "bmc_delete" if method == "DELETE" else "bmc_edit", site)
             with st.lock:
                 cur = st.get_bmc(site, port)
                 if not cur:
@@ -2497,7 +2502,8 @@ def make_handler(app):
                 if method == "PUT":
                     data = self.body_json()
                     new_site = str(data.get("site") or site)
-                    app.need_edit(u, new_site)
+                    if new_site != site:  # chuyen BMC sang site khac = them o site moi
+                        app.need(u, "bmc_add", new_site)
                     b = app.validate_bmc({**cur, **data, "site": new_site}, (site, port))
                     for k in BMC_META[:3]:
                         if k in cur:
@@ -2559,6 +2565,7 @@ def make_handler(app):
             status = ("disabled" if r.get("disabled") else
                       "expired" if exp and exp < dt.date.today().isoformat() else "active")
             return {"name": n, "role": r.get("role"), "sites": r.get("sites") or [],
+                    "perms": user_perms(r), "perms_custom": isinstance(r.get("perms"), list) and r.get("role") in ("operator", "viewer"),
                     "full_name": r.get("full_name", ""), "email": r.get("email", ""), "note": r.get("note", ""),
                     "disabled": bool(r.get("disabled")), "expires": exp, "status": status,
                     "must_change": bool(r.get("must_change")), "totp": bool(r.get("totp_secret")),
@@ -2615,6 +2622,8 @@ def make_handler(app):
                        **self.profile_fields(data, name, u["name"]), "created_at": now_iso(), "created_by": u["name"]}
                 if not is_ad and str(data.get("must_change", "1")).lower() in ("1", "true", "on", "yes"):
                     rec["must_change"] = True
+                if rec["perms"] is None:
+                    del rec["perms"]
                 with st.lock:
                     st.users[name] = rec
                     st.save("users.json")
@@ -2628,7 +2637,11 @@ def make_handler(app):
                 notes = []
                 with st.lock:
                     rec = st.users[name]
+                    if "perms" not in data and rec.get("role") == fields["role"]:  # form cu khong gui quyen -> giu
+                        fields["perms"] = rec.get("perms")
                     rec.update(fields)
+                    if rec.get("perms") is None:
+                        rec.pop("perms", None)
                     rec.update({k: v for k, v in prof.items() if k in data})  # chi doi o co gui len
                     if data.get("password"):
                         if rec.get("source") == "ldap":
@@ -2669,7 +2682,12 @@ def make_handler(app):
                 raise ValidationError("Vai trò không hợp lệ")
             sites = [s for s in (data.get("sites") or []) if s in st.sites]
             if role != "customer":
-                return {"role": role, "sites": [] if role == "admin" else sites, "bmc_tags": [], "bmc_list": []}
+                out = {"role": role, "sites": [] if role == "admin" else sites, "bmc_tags": [], "bmc_list": [], "perms": None}
+                if role in ("operator", "viewer") and isinstance(data.get("perms"), list):
+                    perms = [p for p in PERMS if p in data["perms"]]
+                    if perms != list(ROLE_PERMS[role]):  # trung mac dinh -> khong luu (doi theo vai tro ve sau)
+                        out["perms"] = perms
+                return out
             tags = parse_tags(data.get("bmc_tags") or "")
             raw = data.get("bmc_list") or ""
             items = [x.strip() for x in (re.split(r"[\s,;]+", raw) if isinstance(raw, str) else raw) if str(x).strip()]
@@ -2681,7 +2699,7 @@ def make_handler(app):
                 bmc_list.append(f"{m.group(1)}:{int(m.group(2))}")
             if not tags and not bmc_list:
                 raise ValidationError("Khách hàng: nhập nhãn BMC (vd KH-ABC) hoặc danh sách BMC (site:cổng)")
-            return {"role": role, "sites": [], "bmc_tags": tags, "bmc_list": bmc_list}
+            return {"role": role, "sites": [], "bmc_tags": tags, "bmc_list": bmc_list, "perms": None}
 
         # ------------------------------------------------------------ tong hop
         def overview(self, u):

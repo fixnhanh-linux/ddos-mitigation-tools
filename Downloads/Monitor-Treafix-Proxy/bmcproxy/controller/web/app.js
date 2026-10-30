@@ -124,9 +124,20 @@ $$("[data-close-dialog]").forEach((b) => b.addEventListener("click", () => b.clo
 
 // ------------------------------------------------------------------ Quyền
 const isAdmin = () => state.me && state.me.role === "admin";
-const canEdit = (site) => state.me && (state.me.role === "admin" ||
-  (state.me.role === "operator" && (!state.me.sites.length || state.me.sites.includes(site))));
-const editableSites = () => state.sites.filter((s) => canEdit(s.key));
+// Quyen chi tiet (giong PERMS / ROLE_PERMS o gw_common.py); site bo trong = co quyen o it nhat 1 site
+const PERM_LABEL = {
+  bmc_add: "Thêm BMC", bmc_edit: "Sửa BMC", bmc_delete: "Xoá BMC", apply: "Áp dụng / khôi phục cấu hình",
+  detect: "Dò BMC, kiểm tra kết nối, nhập nginx", guests: "Tạo / thu hồi link khách", maint: "Đặt lịch bảo trì",
+  stats: "Xem thống kê & lịch sử truy cập", audit: "Xem nhật ký thao tác", export: "Xuất CSV",
+};
+const PERM_GROUPS = [["BMC", ["bmc_add", "bmc_edit", "bmc_delete", "export"]], ["Site", ["apply", "detect", "maint", "guests"]],
+  ["Xem", ["stats", "audit"]]];
+const ROLE_PERMS = { operator: Object.keys(PERM_LABEL), viewer: ["export"] };
+const can = (perm, site) => !!state.me && (state.me.role === "admin" || (state.me.role !== "customer" &&
+  (state.me.perms || []).includes(perm) && (site === undefined || !state.me.sites.length || state.me.sites.includes(site))));
+const canEdit = (site) => can("bmc_edit", site);
+const canSelect = (site) => can("bmc_edit", site) || can("bmc_delete", site);
+const editableSites = () => state.sites.filter((s) => can("bmc_add", s.key));
 const siteLabel = (k) => { const s = state.sites.find((x) => x.key === k); return s ? s.label : k; };
 const RANK = { customer: -1, viewer: 0, operator: 1, admin: 2 };
 const isCustomer = () => state.me && state.me.role === "customer";
@@ -156,6 +167,7 @@ async function showApp(me) {
   $("#avatar").textContent = me.name.slice(0, 2);
   $("#avatar").title = me.name + " (" + (ROLE_LABEL[me.role] || me.role) + ")";
   $$("[data-min-role]").forEach((a) => a.classList.toggle("hidden", RANK[me.role] < RANK[a.dataset.minRole]));
+  $$("[data-perm]").forEach((a) => a.classList.toggle("hidden", !can(a.dataset.perm)));
   $$("[data-admin-only]").forEach((a) => a.classList.toggle("hidden", !isAdmin()));
   $("#app").classList.toggle("customer-mode", me.role === "customer");
   buildTabbar();
@@ -285,9 +297,9 @@ function headActions(page) {
     box.appendChild(b);
   };
   if (page === "overview" || page === "bmcs") add("refresh", "Kiểm tra kết nối", "", () => recheck(), "Kiểm tra kết nối toàn bộ BMC");
-  if (page === "bmcs") add("export", "Xuất CSV", "", exportCsv, "Xuất danh sách BMC ra CSV");
+  if (page === "bmcs" && can("export")) add("export", "Xuất CSV", "", exportCsv, "Xuất danh sách BMC ra CSV");
   if (page === "bmcs") add("templates", "Mẫu", "", openTemplates, "Mẫu BMC");
-  if (page === "bmcs" && editableSites().length) add("bulk", "Thêm hàng loạt", "", openBulk, "Thêm hoặc đổi mẫu hàng loạt BMC");
+  if (page === "bmcs" && (editableSites().length || can("bmc_edit"))) add("bulk", "Thêm hàng loạt", "", openBulk, "Thêm hoặc đổi mẫu hàng loạt BMC");
   if (page === "bmcs" && editableSites().length) add("plus", "Thêm BMC", "primary", () => openDrawer(null), "Thêm BMC mới");
   if (page === "sites" && isAdmin()) add("plus", "Thêm site", "primary", addSite, "Thêm site Traefik mới");
   if (page === "traefik") add("refresh", "Làm mới", "", loadTraefik, "Làm mới router Traefik");
@@ -443,7 +455,7 @@ function fillSiteSelects() {
 }
 
 async function recheck(site) {
-  const sites = site ? [site] : state.sites.filter((s) => canEdit(s.key)).map((s) => s.key);
+  const sites = site ? [site] : state.sites.filter((s) => can("detect", s.key)).map((s) => s.key);
   if (!sites.length) return toast("Không có site nào để kiểm tra", true);
   try {
     await Promise.all(sites.map((k) => api("POST", `sites/${k}/command`, { name: "recheck" })));
@@ -472,7 +484,7 @@ function phaseTag(s) {
 // ------------------------------------------------------------------ Thống kê truy cập (Tổng quan)
 let statsAt = 0;
 async function loadStats(force = false) {
-  if (!state.me || state.me.role === "viewer" || isCustomer()) return;
+  if (!can("stats")) return;
   if (!force && Date.now() - statsAt < 60000) return;  // doc nhat ky truy cap: toi da 1 lan / phut
   statsAt = Date.now();
   const s = await api("GET", "stats");
@@ -582,7 +594,7 @@ function renderSites() {
   $("#site-empty").classList.toggle("hidden", state.sites.length > 0);
   grid.innerHTML = state.sites.map((s) => {
     const rep = s.last_report || {};
-    const edit = canEdit(s.key);
+    const ap = can("apply", s.key), dt = can("detect", s.key);
     const k = esc(s.key);
     const warns = (s.warnings || []).slice(0, 3).map((w) =>
       `<div><span class="sev ${w.level}"></span><span>${esc(w.text)}</span></div>`).join("");
@@ -625,17 +637,17 @@ function renderSites() {
       </div>
       <footer class="site-actions">
         <div class="sa-main">
-          ${edit && ["pending", "failed"].includes(s.phase) ? `<button class="btn primary" data-site-act="apply" data-site="${k}">${SITE_ICO.play}Áp dụng</button>` : ""}
-          ${edit && (s.phase === "failed" || (s.skipped || []).length) ? `<button class="btn" data-site-act="retry" data-site="${k}" title="Áp dụng lại (kể cả BMC bị bỏ qua)">${SITE_ICO.retry}Thử lại</button>` : ""}
+          ${ap && ["pending", "failed"].includes(s.phase) ? `<button class="btn primary" data-site-act="apply" data-site="${k}">${SITE_ICO.play}Áp dụng</button>` : ""}
+          ${ap && (s.phase === "failed" || (s.skipped || []).length) ? `<button class="btn" data-site-act="retry" data-site="${k}" title="Áp dụng lại (kể cả BMC bị bỏ qua)">${SITE_ICO.retry}Thử lại</button>` : ""}
           ${isAdmin() && !s.online ? `<button class="btn primary-soft" data-site-act="install" data-site="${k}">${SITE_ICO.terminal}Cài agent</button>` : ""}
           <a class="btn" href="#bmcs" data-goto-site="${k}">${SITE_ICO.list}Xem BMC</a>
 
         </div>
         <div class="sa-tools">
-          ${edit ? `<button class="btn" data-site-act="recheck" data-site="${k}" title="Hỏi lại trạng thái agent / Traefik">${SITE_ICO.check}Kiểm tra</button>` : ""}
-          ${edit && s.online ? `<button class="btn" data-site-act="diagnose" data-site="${k}" title="Ping / thử cổng / thử TLS mọi BMC từ server site">${SITE_ICO.pulse}Kiểm tra BMC</button>` : ""}
-          ${edit ? `<button class="btn" data-site-act="import" data-site="${k}" title="Đọc config nginx cũ trên server">${SITE_ICO.import}Nhập nginx</button>` : ""}
-          ${edit ? `<button class="btn" data-site-act="maint" data-site="${k}" title="Khung giờ bảo trì: không gửi cảnh báo, trang lỗi IPMI ghi 'đang bảo trì'">${SITE_ICO.wrench}Bảo trì</button>` : ""}
+          ${dt ? `<button class="btn" data-site-act="recheck" data-site="${k}" title="Hỏi lại trạng thái agent / Traefik">${SITE_ICO.check}Kiểm tra</button>` : ""}
+          ${dt && s.online ? `<button class="btn" data-site-act="diagnose" data-site="${k}" title="Ping / thử cổng / thử TLS mọi BMC từ server site">${SITE_ICO.pulse}Kiểm tra BMC</button>` : ""}
+          ${can("bmc_add", s.key) ? `<button class="btn" data-site-act="import" data-site="${k}" title="Đọc config nginx cũ trên server">${SITE_ICO.import}Nhập nginx</button>` : ""}
+          ${can("maint", s.key) ? `<button class="btn" data-site-act="maint" data-site="${k}" title="Khung giờ bảo trì: không gửi cảnh báo, trang lỗi IPMI ghi 'đang bảo trì'">${SITE_ICO.wrench}Bảo trì</button>` : ""}
           <button class="btn" data-site-act="history" data-site="${k}">${SITE_ICO.clock}Lịch sử${s.history_count ? `<span class="count">${s.history_count}</span>` : ""}</button>
           ${isAdmin() && s.online ? `<button class="btn" data-site-act="server" data-site="${k}" title="Log agent / Traefik, restart từ xa">${SITE_ICO.server}Server</button>` : ""}
           ${isAdmin() && agentOutdated(s) ? `<button class="btn chip-warn" data-site-act="update" data-site="${k}" title="Agent tự tải bản ${esc(s.agent_pkg_build)} từ web, cài, khởi động lại">${SITE_ICO.import}Cập nhật agent</button>` : ""}
@@ -874,7 +886,7 @@ function renderBmcs() {
     const key = `${b.site}:${b.port}`;
     const sel = state.selected.has(key);
     return `<tr class="clickable ${b.enabled ? "" : "off"} ${sel ? "selected" : ""}" data-site="${esc(b.site)}" data-port="${b.port}" tabindex="0">
-      <td class="check">${canEdit(b.site) ? `<input type="checkbox" data-select="${esc(key)}" ${sel ? "checked" : ""} aria-label="Chọn BMC ${b.port}">` : ""}</td>
+      <td class="check">${canSelect(b.site) ? `<input type="checkbox" data-select="${esc(key)}" ${sel ? "checked" : ""} aria-label="Chọn BMC ${b.port}">` : ""}</td>
       <td>${healthDot(b.health && b.health.web, b.site_online)}</td>
       <td><span class="tag">${esc(siteLabel(b.site))}</span></td>
       <td><div class="port">${b.port}</div></td>
@@ -966,7 +978,8 @@ function openDrawer(b) {
   $("#bmc-form-error").textContent = editable ? "" : "Bạn chỉ có quyền xem BMC này.";
   $("#preview").textContent = "";
   $("#preview-wrap").open = false;
-  const choices = b && !canEdit(b.site) ? state.sites.filter((s) => s.key === b.site) : editableSites();
+  const choices = !b ? editableSites() : !canEdit(b.site) ? state.sites.filter((s) => s.key === b.site)
+    : state.sites.filter((s) => s.key === b.site || can("bmc_add", s.key));
   f.site.innerHTML = choices.map((s) => `<option value="${esc(s.key)}">${esc(s.label)} — ${esc(s.domain)}</option>`).join("");
   const d = b || { auth: true, console_auth: true, enabled: true, jnlp_rewrite: true, host_header: "client", site: $("#filter-site").value || (choices[0] || {}).key };
   fillTemplateSelect(f.template);
@@ -996,12 +1009,12 @@ function openDrawer(b) {
     }
   }
   $$("input, select", f).forEach((el) => { el.disabled = !editable; });
-  $("#btn-delete").classList.toggle("hidden", !b || !editable);
-  $("#btn-bmc-check").classList.toggle("hidden", !b || !editable);
+  $("#btn-delete").classList.toggle("hidden", !b || !can("bmc_delete", b.site));
+  $("#btn-bmc-check").classList.toggle("hidden", !b || !can("detect", b.site));
   $("#btn-bmc-history").classList.toggle("hidden", !b);
-  $("#btn-bmc-clone").classList.toggle("hidden", !b || !editable);
-  $("#btn-bmc-guest").classList.toggle("hidden", !b || !editable || !b.auth);
-  $("#btn-bmc-access").classList.toggle("hidden", !b || state.me.role === "viewer");
+  $("#btn-bmc-clone").classList.toggle("hidden", !b || !editableSites().length);
+  $("#btn-bmc-guest").classList.toggle("hidden", !b || !can("guests", b.site) || !b.auth);
+  $("#btn-bmc-access").classList.toggle("hidden", !b || !can("stats", b.site));
   $("#btn-save-bmc").classList.toggle("hidden", !editable);
   $("#drawer").classList.add("open");
   $("#drawer").setAttribute("aria-hidden", "false");
@@ -1064,7 +1077,7 @@ $("#preview-wrap").addEventListener("toggle", async (e) => {
 
 // ------------------------------------------------------------------ Áp dụng
 function renderPending() {
-  const mine = state.sites.filter((s) => canEdit(s.key));
+  const mine = state.sites.filter((s) => can("apply", s.key));
   const pend = mine.filter((s) => s.phase === "pending").length;
   const failed = mine.filter((s) => s.phase === "failed").length;
   const applying = mine.filter((s) => s.phase === "applying").length;
@@ -1096,7 +1109,7 @@ const KIND = { add: ["ok", "thêm"], modify: ["warn", "sửa"], delete: ["bad", 
 const AREA = { static: "traefik.yml (restart Traefik)", dynamic: "Router (tự nạp, không gián đoạn)", nginx: "File nginx cũ sẽ tắt" };
 
 async function openPlan(only) {
-  const cands = state.sites.filter((s) => canEdit(s.key) && (only ? only.includes(s.key) : ["pending", "failed"].includes(s.phase)));
+  const cands = state.sites.filter((s) => can("apply", s.key) && (only ? only.includes(s.key) : ["pending", "failed"].includes(s.phase)));
   const box = $("#plan-sites");
   if (!cands.length) {
     box.innerHTML = '<p class="hint">Mọi site đã đồng bộ.</p>';
@@ -1338,7 +1351,7 @@ function siteMaint(s) {
         <div><b class="nowrap">${m.port ? `BMC ${m.port}` : "Cả site"}</b> ${MAINT_ST[m.status] || ""}
           <div class="mono cell-sub nowrap">${esc(hhmm(m.start))} → ${esc(hhmm(m.end))}</div></div>
         <div class="grow">${esc(m.note || "")}<div class="cell-sub">${esc(m.created_by || "")}${m.ended_by ? ` · kết thúc sớm bởi ${esc(m.ended_by)}` : ""}</div></div>
-        ${m.status !== "done" ? `<button type="button" class="btn small danger-ghost" data-maint-del="${esc(m.id)}">${m.status === "active" ? "Kết thúc" : "Huỷ"}</button>` : ""}
+        ${m.status !== "done" && can("maint", s.key) ? `<button type="button" class="btn small danger-ghost" data-maint-del="${esc(m.id)}">${m.status === "active" ? "Kết thúc" : "Huỷ"}</button>` : ""}
       </div>`).join("")}</div>` : ""}<h3 class="mt">Thêm lịch bảo trì</h3>` },
     { type: "select", name: "port", label: "Phạm vi", value: "0", span: false,
       options: [["0", "Cả site (mọi BMC + agent)"], ...bmcs.map((b) => [String(b.port), `BMC ${b.port}${b.note ? " · " + b.note : ""}`])] },
@@ -1409,7 +1422,7 @@ function guestRows(list, withBmc = true) {
     <td class="mono nowrap">${esc(fmtTs(g.expires).slice(withBmc ? 0 : 5, 16))}${g.status === "active" ? `<div class="cell-sub">còn ${g.left_minutes >= 120 ? Math.round(g.left_minutes / 60) + " giờ" : g.left_minutes + " phút"}</div>` : ""}</td>
     ${withBmc ? `<td>${esc(g.created_by || "")}<div class="cell-sub">${esc(fmtTs(g.created_at || ""))}</div></td>` : ""}
     <td>${GUEST_ST[g.status] || ""}${g.revoked_by ? `<div class="cell-sub">bởi ${esc(g.revoked_by)}</div>` : ""}</td>
-    <td style="text-align:right">${g.status === "active" && canEdit(g.site) ? `<button class="btn small danger-ghost" data-guest-revoke="${esc(g.id)}">Thu hồi</button>` : ""}</td></tr>`).join("");
+    <td style="text-align:right">${g.status === "active" && can("guests", g.site) ? `<button class="btn small danger-ghost" data-guest-revoke="${esc(g.id)}">Thu hồi</button>` : ""}</td></tr>`).join("");
 }
 async function loadGuests() {
   const list = await api("GET", "guests");
@@ -1499,7 +1512,7 @@ async function loadUsers() {
     return `<tr><td><b>${esc(u.name)}</b>${u.name === state.me.name ? ' <span class="tag">bạn</span>' : ""}
       ${u.full_name ? `<div class="cell-sub">${esc(u.full_name)}</div>` : ""}
       ${u.email ? `<div class="cell-sub">${esc(u.email)}</div>` : ""}${u.note ? `<div class="cell-sub">${esc(u.note)}</div>` : ""}</td>
-    <td><span class="tag ${u.role === "admin" ? "info" : ""}">${ROLE_LABEL[u.role] || u.role}</span></td>
+    <td><span class="tag ${u.role === "admin" ? "info" : ""}">${ROLE_LABEL[u.role] || u.role}</span>${permSummary(u)}</td>
     <td>${u.role === "customer" ? [...(u.bmc_tags || []).map((t) => `<span class="tag info">${esc(t)}</span>`), ...(u.bmc_list || []).map((x) => `<span class="tag mono">${esc(x)}</span>`)].join("")
       : u.role === "admin" || !u.sites.length ? '<span class="cell-sub">mọi site</span>' : u.sites.map((s) => `<span class="tag">${esc(siteLabel(s))}</span>`).join("")}</td>
     <td>${STATUS[u.status] || ""} ${u.source === "ldap" ? `<span class="tag info" title="${esc((u.ldap_groups || []).join("\n") || "Đăng nhập bằng AD")}">AD</span>` : ""}
@@ -1558,6 +1571,7 @@ function editUser(u) {
       type: "checks", name: "sites", label: "Phạm vi site (để trống = mọi site; quản trị luôn là mọi site)", value: u ? u.sites : [],
       options: state.sites.map((s) => [s.key, s.label])
     },
+    { type: "html", html: permBox(u ? u.role : "operator", u ? u.perms : ROLE_PERMS.operator) },
     { type: "html", html: '<p class="hint"><b>Khách hàng</b>: chỉ thấy trang "BMC của tôi" với các BMC theo nhãn / danh sách dưới đây, tự mở BMC (link 4 giờ), không thấy site hay cài đặt.</p>' },
     { name: "bmc_tags", label: "Khách hàng · nhãn BMC (cách nhau dấu phẩy)", value: u ? (u.bmc_tags || []).join(", ") : "", placeholder: "KH-ABC", span: false },
     { name: "bmc_list", label: "Khách hàng · BMC cụ thể (site:cổng)", value: u ? (u.bmc_list || []).join(" ") : "", placeholder: "hcm:8001 hcm:8005", span: false },
@@ -1576,11 +1590,41 @@ function editUser(u) {
     ...(u ? [{ type: "html", html: `<p class="hint">Tạo ${esc(fmtTime(u.created_at)) || "?"}${u.created_by ? " bởi " + esc(u.created_by) : ""}
       · đổi mật khẩu gần nhất ${esc(fmtTime(u.password_changed)) || "chưa rõ"}</p>` }] : []),
   ], async (d) => {
+    const pb = $("#perm-box");
+    if (pb && !pb.classList.contains("hidden")) d.perms = $$("input:checked", pb).map((i) => i.value);
     if (u) await api("PUT", `users/${encodeURIComponent(u.name)}`, d);
     else await api("POST", "users", d);
     toast("Đã lưu tài khoản");
     loadUsers();
   });
+  const role = $("#gen-form").elements.role;
+  role.addEventListener("change", () => setPermBox(role.value, ROLE_PERMS[role.value] || []));
+}
+
+// Quyen chi tiet trong form tai khoan: chi Van hanh / Chi xem (Quan tri = moi quyen, Khach hang = cong rieng)
+function permBox(role, perms) {
+  return `<div id="perm-box" class="perm-box${ROLE_PERMS[role] ? "" : " hidden"}">
+    <div class="perm-head"><b>Quyền chi tiết</b><span class="hint">trong phạm vi site đã chọn · tick theo vai trò, sửa thêm / bớt từng quyền</span>
+      <button type="button" class="btn small ghost" data-perm-reset>Mặc định theo vai trò</button></div>
+    <div class="perm-groups">${PERM_GROUPS.map(([g, ks]) => `<div class="perm-group"><div class="perm-gname">${g}</div>${ks.map((k) =>
+      `<label><input type="checkbox" value="${k}"${(perms || []).includes(k) ? " checked" : ""}> ${esc(PERM_LABEL[k])}</label>`).join("")}</div>`).join("")}</div>
+  </div>`;
+}
+function setPermBox(role, perms) {
+  const box = $("#perm-box");
+  box.classList.toggle("hidden", !ROLE_PERMS[role]);
+  $$("input", box).forEach((i) => { i.checked = perms.includes(i.value); });
+}
+$("#gen-body").addEventListener("click", (e) => {
+  if (!e.target.closest("[data-perm-reset]")) return;
+  const role = $("#gen-form").elements.role.value;
+  setPermBox(role, ROLE_PERMS[role] || []);
+});
+function permSummary(u) {
+  if (!ROLE_PERMS[u.role]) return "";
+  const n = (u.perms || []).length, all = Object.keys(PERM_LABEL).length;
+  const tip = (u.perms || []).map((k) => "✓ " + PERM_LABEL[k]).join("\n") || "chỉ xem BMC / site";
+  return `<div class="cell-sub" title="${esc(tip)}">${u.perms_custom ? '<span class="tag warn">tuỳ chỉnh</span> ' : ""}${n}/${all} quyền</div>`;
 }
 
 // ------------------------------------------------------------------ Cài đặt
@@ -2072,14 +2116,20 @@ function renderBulkBar() {
   const n = state.selected.size;
   $("#bulk-bar").classList.toggle("hidden", !n);
   $("#bulk-count").textContent = n;
-  const vis = (state.visibleRows || []).filter((b) => canEdit(b.site));
+  const selSites = [...new Set([...state.selected].map((k) => k.split(":")[0]))];
+  const allow = (p) => selSites.every((s) => can(p, s));
+  $$("#bulk-bar [data-bulk]").forEach((b) => {
+    const p = b.dataset.bulk === "delete" ? "bmc_delete" : b.dataset.bulk === "clear" ? null : "bmc_edit";
+    b.classList.toggle("hidden", !!p && !allow(p));
+  });
+  const vis = (state.visibleRows || []).filter((b) => canSelect(b.site));
   const all = $("#check-all");
   all.checked = vis.length > 0 && vis.every((b) => state.selected.has(`${b.site}:${b.port}`));
   all.indeterminate = !all.checked && vis.some((b) => state.selected.has(`${b.site}:${b.port}`));
 }
 
 $("#check-all").addEventListener("click", (e) => {
-  const vis = (state.visibleRows || []).filter((b) => canEdit(b.site));
+  const vis = (state.visibleRows || []).filter((b) => canSelect(b.site));
   vis.forEach((b) => { const k = `${b.site}:${b.port}`; if (e.target.checked) state.selected.add(k); else state.selected.delete(k); });
   renderBmcs();
 });
@@ -2319,7 +2369,7 @@ async function siteDiagnose(s) {
 async function siteHistory(s) {
   try {
     const r = await api("GET", `sites/${s.key}/history`);
-    const edit = canEdit(s.key);
+    const edit = can("apply", s.key);
     infoBox(`Lịch sử áp dụng · ${s.label}`, r.rows.length ? `<p class="hint">Mỗi lần bấm Áp dụng là một bản cấu hình. <b>Quay về</b> = đặt lại danh sách BMC của site
       như bản đó (có sao lưu trước), sau đó bấm <b>Áp dụng</b> để đẩy xuống server.</p>
       <div class="table-wrap"><table class="table"><thead><tr><th>Thời điểm</th><th>Kết quả</th><th>Bản</th><th>Người áp dụng</th><th>BMC</th><th></th></tr></thead><tbody>

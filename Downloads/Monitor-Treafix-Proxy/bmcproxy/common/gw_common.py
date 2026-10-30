@@ -44,6 +44,22 @@ RE_HEADER_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 RE_IP = re.compile(r"^[0-9a-fA-F:.]{2,45}$")
 LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
 ROLES = ("admin", "operator", "viewer", "customer")  # customer: chi thay BMC cua minh (cong khach hang)
+# Quyen chi tiet cho Van hanh / Chi xem (trong pham vi site): vai tro = bo quyen mac dinh, tick them / bo bot tung quyen
+PERMS = {
+    "bmc_add": "thêm BMC", "bmc_edit": "sửa BMC", "bmc_delete": "xoá BMC",
+    "apply": "áp dụng / khôi phục cấu hình", "detect": "dò BMC, kiểm tra, lấy BMC từ agent",
+    "guests": "tạo / thu hồi link khách", "maint": "đặt lịch bảo trì",
+    "stats": "xem thống kê & lịch sử truy cập", "audit": "xem nhật ký thao tác", "export": "xuất danh sách BMC (CSV)",
+}
+ROLE_PERMS = {"admin": tuple(PERMS), "operator": tuple(PERMS), "viewer": ("export",), "customer": ()}
+
+
+def user_perms(rec):
+    """Quyen cua 1 tai khoan: perms rieng (neu admin da tick) hoac mac dinh theo vai tro."""
+    role = rec.get("role", "viewer")
+    if role in ("admin", "customer") or not isinstance(rec.get("perms"), list):
+        return list(ROLE_PERMS.get(role, ()))
+    return [p for p in rec["perms"] if p in PERMS]
 
 BMC_DEFAULTS = {
     "site": "",
