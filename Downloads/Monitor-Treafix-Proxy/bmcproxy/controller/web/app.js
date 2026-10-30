@@ -2483,16 +2483,36 @@ function sysLine(x) {
 const agentOutdated = (s) => s.online && s.agent_pkg_build && s.agent_pkg_build !== "?" && s.agent_build !== s.agent_pkg_build;
 
 async function siteUpdateAgent(s) {
-  if (!s.agent_build) {  // agent ban cu (chua co lenh tu cap nhat): cap nhat 1 lan bang lenh tren server
-    const cmd = (t) => `<div class="code-row"><pre class="code">${esc(t)}</pre><button type="button" class="btn icon-btn copy-btn" data-copy="${esc(t)}" title="Sao chép">⧉</button></div>`;
-    return infoBox(`Cập nhật agent · ${s.label}`, `<p class="hint">Agent ở site này là <b>bản cũ</b>, chưa có lệnh tự cập nhật từ web.
-      Cập nhật <b>1 lần</b> bằng lệnh trên server ${esc(s.hostname || s.key)} (${esc(s.remote_ip || "")}); từ lần sau chỉ cần bấm nút này.</p>
-      <ol class="steps">
-        <li><b>Chép gói agent lên server</b> (PowerShell trên máy Windows):${cmd(`scp "C:\\Users\\FIX NHANH\\Downloads\\Monitor-Treafix-Proxy\\bmcproxy\\dist\\bmc-gateway-agent-2.0.0.zip" root@${s.remote_ip || "<ip-server>"}:/home/`)}</li>
-        <li><b>Giải nén</b> (SSH vào server):${cmd("cd /home && rm -rf bmc-gateway-agent && python3 -m zipfile -e bmc-gateway-agent-2.0.0.zip /home")}</li>
-        <li><b>Cài đè</b> - giữ nguyên agent.json, cấu hình Traefik đang chạy, không restart Traefik:${cmd("sudo bash /home/bmc-gateway-agent/install.sh agent")}</li>
-      </ol>
-      <p class="hint">Xong khoảng 10 giây thẻ site hiện <b>Bản agent ${esc(s.agent_pkg_build)}</b>.</p>`);
+  if (!s.agent_build) {  // agent ban cu (chua co lenh tu cap nhat): cap nhat 1 lan bang 1 dong tren server
+    let r;
+    try { r = await api("POST", `sites/${s.key}/install`, { mode: "update" }); } catch (err) { return toast(err.message, true); }
+    const line = `curl -fsSk ${location.origin}${r.path} | sudo bash`;
+    infoBox(`Cập nhật agent · ${s.label}`, `<p class="hint">Agent ở site này là <b>bản cũ</b>, chưa nhận được lệnh tự cập nhật từ web.
+      Chạy <b>1 dòng</b> này <b>1 lần</b> trên server ${esc(s.hostname || s.key)} (${esc(s.remote_ip || "")}), SSH bằng root:</p>
+      <div class="code-row"><pre class="code install-line">${esc(line)}</pre>
+        <button type="button" class="btn small primary" data-copy="${esc(line)}">Sao chép</button></div>
+      <ul class="hint" style="margin:10px 0 0 18px">
+        <li>Script tải gói agent ${esc(s.agent_pkg_build)} từ web rồi cài đè: <b>giữ</b> agent.json, token, cấu hình Traefik; không restart Traefik, BMC không gián đoạn.</li>
+        <li>Lệnh dùng 1 lần, hết hạn sau ${Math.round(r.expires_in / 60)} phút. Từ lần sau chỉ cần bấm <b>Cập nhật agent</b>.</li>
+        <li>Server phải gọi tới được <code>${esc(location.origin)}</code> (không được thì mở web bằng địa chỉ server vào được rồi bấm lại).</li>
+        ${r.package ? "" : '<li><b class="tag bad">Web chưa có gói agent</b>: cài lại web bằng gói bmc-gateway-web mới.</li>'}
+      </ul>
+      <p class="hint mt" id="upd-old-wait">Đang chờ agent bản mới kết nối…</p>`);
+    const until = Date.now() + 15 * 60 * 1000;
+    const timer = setInterval(async () => {
+      if (!$("#dlg-info").open || Date.now() > until) return clearInterval(timer);
+      try {
+        const x = (await api("GET", "sites")).find((y) => y.key === s.key);
+        if (x && x.agent_build) {
+          clearInterval(timer);
+          const w = $("#upd-old-wait");
+          if (w) w.innerHTML = `<span class="form-msg ok">✓ Đã cập nhật: agent ${esc(x.agent_build)}</span>`;
+          toast(`Agent ${s.label} đã lên bản ${x.agent_build}`);
+          refreshAll().catch(() => { });
+        }
+      } catch { /* thu lai lan sau */ }
+    }, 5000);
+    return;
   }
   if (!await confirmBox("Cập nhật agent", `Agent ở ${s.label} (${s.agent_build || "?"}) sẽ tải bản ${s.agent_pkg_build} từ web,
     chạy thử, sao lưu bản cũ rồi tự khởi động lại (~10 giây). Traefik và BMC không bị gián đoạn.`, "Cập nhật")) return;

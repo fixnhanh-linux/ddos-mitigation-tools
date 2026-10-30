@@ -287,6 +287,22 @@ class SiteTest(unittest.TestCase):
         lst = req(self.port, "GET", "/api/guests", None, self.ck)[2]
         self.assertEqual(next(x for x in lst if x["id"] == g["id"])["status"], "revoked")
 
+    def test_update_line_keeps_token(self):
+        # agent ban cu: lenh 1 dong chi cai de code agent, khong doi token / agent.json
+        before = self.st.sites["hcm"]["token_hash"]
+        s, _, r = req(self.port, "POST", "/api/sites/hcm/install", {"mode": "update"}, self.ck)
+        self.assertEqual(s, 200, r)
+        s, _, body = req(self.port, "GET", r["path"], None)
+        if s == 503:
+            self.skipTest("chưa build gói agent (tools/build_packages.py)")
+        text = body.decode() if isinstance(body, bytes) else str(body)
+        self.assertEqual(s, 200, text[:200])
+        self.assertIn("install.sh agent", text)
+        self.assertNotIn("agent.json <<", text)
+        self.assertNotIn("FORCE_AGENT_JSON", text)
+        self.assertEqual(self.st.sites["hcm"]["token_hash"], before)
+        self.assertEqual(req(self.port, "GET", r["path"], None)[0], 410)  # ma dung 1 lan
+
     def test_ip_rules_and_blocked_log(self):
         from gw_auth import AuthGateway
         # web: tao quy tac -> agent nhan qua sync; dai qua rong / IP sai bi tu choi

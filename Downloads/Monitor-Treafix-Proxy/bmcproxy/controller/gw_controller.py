@@ -38,6 +38,8 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 AGENT_PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-package")
 INSTALL_TTL = 3600          # ma cai agent het han sau 1 gio
 INSTALL_PKG_WINDOW = 900    # sau khi dung ma: 15 phut de tai goi
+# Cap nhat agent ban cu (chua co lenh update_agent) bang 1 dong tren server: khong doi token / agent.json
+UPDATE_SCRIPT = '#!/usr/bin/env bash\n# Treafix Proxy BB - cap nhat agent site __SITE__ (tao boi web luc __NOW__). Giu agent.json, token, Traefik. Ma dung 1 lan.\nset -euo pipefail\nWEB="__WEB__"\nCODE="__CODE__"\nsay() { printf \'\\n\\033[1;36m==> %s\\033[0m\\n\' "$*"; }\ndie() { printf \'\\n\\033[1;31mLOI: %s\\033[0m\\n\' "$*" >&2; exit 1; }\n[ "$(id -u)" = 0 ] || die "Chạy bằng root: curl -fsSk $WEB/install/... | sudo bash"\ncommand -v python3 >/dev/null || die "Thiếu python3"\nsay "Tải gói agent từ web"\ncd /home\ncurl -fsSk --max-time 120 -o bmc-gateway-agent.zip "$WEB/install/$CODE/agent.zip" \\\n  || die "Không tải được gói agent (mã hết hạn? - tạo lệnh mới trên web: Site → Cập nhật agent)"\nrm -rf /home/bmc-gateway-agent\npython3 -m zipfile -e bmc-gateway-agent.zip /home\n[ -f /home/bmc-gateway-agent/install.sh ] || die "Gói agent không đúng"\nsay "Cài đè agent (giữ agent.json + cấu hình Traefik, không restart Traefik)"\nbash /home/bmc-gateway-agent/install.sh agent || die "Cài chưa xong - xem lỗi ở trên, chạy lại: sudo bash /home/bmc-gateway-agent/install.sh agent"\necho\necho "Xong. Trên web, thẻ site __SITE__ hiện bản agent mới trong ~10 giây; lần sau chỉ cần bấm Cập nhật agent."\n'
 INSTALL_SCRIPT = '#!/usr/bin/env bash\n# Treafix Proxy BB - cai agent cho site __SITE__ (tao boi web luc __NOW__). Ma cai chi dung 1 lan.\nset -euo pipefail\nWEB="__WEB__"\nCODE="__CODE__"\nsay() { printf \'\\n\\033[1;36m==> %s\\033[0m\\n\' "$*"; }\ndie() { printf \'\\n\\033[1;31mLOI: %s\\033[0m\\n\' "$*" >&2; exit 1; }\n[ "$(id -u)" = 0 ] || die "Chạy bằng root: curl -fsSk $WEB/install/... | sudo bash"\ncommand -v python3 >/dev/null || die "Thiếu python3 (Ubuntu 22.04 có sẵn)"\ncommand -v curl >/dev/null || die "Thiếu curl: apt install -y curl"\n\nsay "Tải gói agent từ web"\ncd /home\ncurl -fsSk --max-time 120 -o bmc-gateway-agent.zip "$WEB/install/$CODE/agent.zip" \\\n  || die "Không tải được gói agent (mã cài hết hạn? - tạo lệnh mới trên web: Site → Cài agent)"\nrm -rf /home/bmc-gateway-agent\npython3 -m zipfile -e bmc-gateway-agent.zip /home\n[ -f /home/bmc-gateway-agent/install.sh ] || die "Gói agent không đúng"\n\nsay "Ghi /root/agent.json (site __SITE__, token mới)"\n( umask 077; cat > /root/agent.json <<\'JSON\'\n__AGENT_JSON__\nJSON\n)\nif curl -fs -o /dev/null --max-time 8 "$WEB/"; then VERIFY=true; else VERIFY=false; fi\npython3 - /root/agent.json "$VERIFY" <<\'PY\'\nimport json, sys\np, v = sys.argv[1], sys.argv[2] == "true"\nc = json.load(open(p)); c["verify_tls"] = v\njson.dump(c, open(p, "w"), indent=1)\nprint("    OK verify_tls =", v, "(web dùng chứng chỉ tự ký)" if not v else "")\nPY\n\nsay "Cài Traefik + agent"\nFORCE_AGENT_JSON=1 AGENT_JSON=/root/agent.json bash /home/bmc-gateway-agent/install.sh agent || {\n  echo\n  echo "Cài chưa xong. Sửa lỗi ở trên (vd thiếu chứng chỉ: CERT=/duong/dan.cer KEY=/duong/dan.key) rồi chạy lại:"\n  echo "    sudo FORCE_AGENT_JSON=1 bash /home/bmc-gateway-agent/install.sh agent"\n  exit 1\n}\necho\necho "Xong. Trên web, site __SITE__ chuyển chấm xanh trong ~10 giây."\necho "Tuỳ chọn - console Java trên web:  sudo bash /home/bmc-gateway-agent/install.sh kvm"\n'
 SESSION_TTL = 12 * 3600          # phien thuong (cookie mat khi dong trinh duyet)
 REMEMBER_TTL = 30 * 24 * 3600   # "Ghi nho dang nhap"
@@ -2340,14 +2342,16 @@ def make_handler(app):
                 return self.send(200, {"queued": True, "online": app.online(key), "req": cmd.get("req", "")})
             if method == "POST" and action == "install":
                 app.need_admin(u)
+                mode = "update" if self.body_json(1000).get("mode") == "update" else "install"
                 code = secrets.token_urlsafe(24)
                 with st.lock:
                     now = time.time()
                     for h in [h for h, v in app.install_codes.items() if v["exp"] < now - INSTALL_PKG_WINDOW]:
                         del app.install_codes[h]
                     app.install_codes[hash_token(code)] = {"site": key, "exp": now + INSTALL_TTL, "by": u["name"],
-                                                           "used_at": None, "ip": None}
-                st.audit(u["name"], "site-install-code", "tạo lệnh cài agent (1 lần, 1 giờ)", key)
+                                                           "used_at": None, "ip": None, "mode": mode}
+                st.audit(u["name"], "site-install-code", ("tạo lệnh cập nhật agent" if mode == "update" else "tạo lệnh cài agent")
+                         + " (1 lần, 1 giờ)", key)
                 return self.send(200, {"code": code, "path": f"/install/{code}", "expires_in": INSTALL_TTL,
                                        "package": bool(self.agent_package()), "online": app.online(key)})
             if method == "GET" and action in ("logs", "diag", "action", "detect"):
@@ -2415,6 +2419,16 @@ def make_handler(app):
             if not self.agent_package():
                 body = "echo 'LOI: web chua co goi agent (cai lai web bang goi bmc-gateway-web moi)' >&2; exit 1\n"
                 return self.send(503, body.encode(), "text/x-shellscript; charset=utf-8")
+            scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
+            host = re.sub(r"[^A-Za-z0-9.:\[\]-]", "", self.headers.get("Host") or "")
+            web = f"{scheme}://{host}"
+            if rec.get("mode") == "update":  # chi cap nhat code agent: giu token, agent.json, IP duoc phep
+                with st.lock:
+                    rec["used_at"], rec["ip"] = now, ip
+                st.audit(rec["by"], "site-install", f"server {ip} chạy lệnh cập nhật agent", site)
+                script = (UPDATE_SCRIPT.replace("__WEB__", web).replace("__CODE__", code).replace("__SITE__", site)
+                          .replace("__NOW__", now_iso()))
+                return self.send(200, script.encode("utf-8"), "text/x-shellscript; charset=utf-8")
             token = secrets.token_urlsafe(32)
             with st.lock:
                 rec["used_at"], rec["ip"] = now, ip
@@ -2426,9 +2440,6 @@ def make_handler(app):
                     added = f", thêm IP {ip} vào IP được phép"
                 st.save("sites.json")
             st.audit(rec["by"], "site-install", f"server {ip} chạy lệnh cài agent (token mới{added})", site)
-            scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
-            host = re.sub(r"[^A-Za-z0-9.:\[\]-]", "", self.headers.get("Host") or "")
-            web = f"{scheme}://{host}"
             cfg = self.agent_config(site, token)
             cfg["controller_url"] = web
             script = (INSTALL_SCRIPT.replace("__WEB__", web).replace("__CODE__", code).replace("__SITE__", site)
