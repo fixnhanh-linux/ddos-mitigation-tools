@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import ssl
+import unicodedata
 import struct
 import subprocess
 import time
@@ -43,6 +44,32 @@ RE_USER = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 RE_HEADER_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 RE_IP = re.compile(r"^[0-9a-fA-F:.]{2,45}$")
 LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
+# Chu in ra tren server (console, log agent / web, script cai dat): tieng Viet khong dau - terminal nao cung doc duoc
+_ASCII_SYMBOLS = {"đ": "d", "Đ": "D", "→": "->", "←": "<-", "·": "-", "…": "...", "—": "-", "–": "-", "✓": "OK", "✗": "X",
+                  "⚠": "!", "“": '"', "”": '"', "‘": "'", "’": "'", "≥": ">=", "≤": "<=", "×": "x", "•": "*", "⌖": "@"}
+
+
+def no_accent(text):
+    """'Đã cập nhật → xong' -> 'Da cap nhat -> xong'. Ky tu khac ngoai ASCII bi bo."""
+    if text.isascii():
+        return text
+    text = "".join(_ASCII_SYMBOLS.get(c, c) for c in text)
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+
+class NoAccentStream:
+    """Boc sys.stdout / sys.stderr: moi chu in ra deu bo dau (journalctl, terminal SSH)."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def write(self, s):
+        return self._inner.write(no_accent(s) if isinstance(s, str) else s)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 ROLES = ("admin", "operator", "viewer", "customer")  # customer: chi thay BMC cua minh (cong khach hang)
 # Quyen chi tiet cho Van hanh / Chi xem (trong pham vi site): vai tro = bo quyen mac dinh, tick them / bo bot tung quyen
 PERMS = {

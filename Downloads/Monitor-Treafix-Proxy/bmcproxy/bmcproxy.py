@@ -80,6 +80,8 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+    from gw_common import NoAccentStream
+    sys.stdout, sys.stderr = NoAccentStream(sys.stdout), NoAccentStream(sys.stderr)  # log server: khong dau
     ap = argparse.ArgumentParser(description="Treafix Proxy BB (Traefik, nhiều site)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -120,8 +122,8 @@ def main():
     elif args.cmd == "adduser":
         if not RE_USER.match(args.name):
             sys.exit("Tên chỉ gồm chữ, số, . _ -")
-        pw = getpass.getpass("Mật khẩu (>=10 ký tự): ")
-        if len(pw) < 10 or pw != getpass.getpass("Nhập lại: "):
+        pw = getpass.getpass("Mat khau (>=10 ky tu): ")
+        if len(pw) < 10 or pw != getpass.getpass("Nhap lai: "):
             sys.exit("Mật khẩu quá ngắn hoặc không khớp")
         existed = args.name in store.users
         rec = store.users.get(args.name, {})
