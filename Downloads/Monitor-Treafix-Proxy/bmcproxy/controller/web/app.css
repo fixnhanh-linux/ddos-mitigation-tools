@@ -933,3 +933,72 @@ th.sortable::after { content: attr(data-dir); font-size: 10px; margin-left: 4px;
 .blocked-kpis .num { font-size: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kpi .foot a { color: inherit; text-decoration: underline dotted; }
 
+/* ---------- Tong quan: bieu do (mau theo bo mau da kiem tra mu mau; sang / toi chon rieng) ---------- */
+:root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --h1: #cde2fb; --h2: #9ec5f4; --h3: #6da7ec; --h4: #3987e5; --h5: #256abf; --h6: #184f95; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --h1: #104281; --h2: #184f95; --h3: #256abf; --h4: #2a78d6; --h5: #5598e7; --h6: #86b6ef; }
+}
+:root[data-theme="dark"] { --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+  --h1: #104281; --h2: #184f95; --h3: #256abf; --h4: #2a78d6; --h5: #5598e7; --h6: #86b6ef; }
+
+.stats-block { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stats-block > .panel:last-child { grid-column: auto; }
+.stats-block .ov-chart-panel, .stats-block .ov-heat-panel { grid-column: span 2; }
+@media (max-width: 1100px) { .stats-block .ov-chart-panel, .stats-block .ov-heat-panel { grid-column: auto; } }
+
+.chart-head { align-items: flex-start; flex-wrap: wrap; }
+.chart-head .hint { margin-top: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--panel-2); }
+.seg button { border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--text-2); padding: 4px 10px;
+  border-radius: 6px; cursor: pointer; }
+.seg button.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--text-2); margin: 2px 0 10px; }
+.chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.sw.s1, .sg.s1 { background: var(--s1); } .sw.s2, .sg.s2 { background: var(--s2); } .sw.s3, .sg.s3 { background: var(--s3); }
+
+.stack-chart { --yw: 34px; }
+.stack-chart .plot { position: relative; height: 200px; margin-left: var(--yw); }
+.stack-chart .grid { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.stack-chart .gl { height: 0; border-top: 1px solid var(--line-2); position: relative; }
+.stack-chart .gl:last-child { border-top-color: var(--line); }
+.stack-chart .gl span { position: absolute; right: calc(100% + 6px); top: -8px; font-size: 11px; color: var(--muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stack-chart .cols { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+.stack-chart .col { position: relative; height: 100%; display: flex; align-items: flex-end; justify-content: center; outline: none;
+  padding: 0 max(1px, min(6px, calc(30% / 2))); border-radius: 4px; cursor: default; }
+.stack-chart .col:hover, .stack-chart .col.hot { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.stack-chart .col:focus-visible { box-shadow: 0 0 0 2px var(--accent) inset; }
+.stack-chart .stack { width: 100%; max-width: 40px; height: 100%; display: flex; flex-direction: column-reverse; }
+.stack-chart .sg { display: block; width: 100%; min-height: 2px; }
+.stack-chart .sg + .sg { margin-bottom: 2px; }   /* khe 2px mau nen giua cac doan */
+.stack-chart .stack .sg:last-child { border-radius: 4px 4px 0 0; }
+.stack-chart .peak { position: absolute; left: 0; right: 0; text-align: center; font-size: 11.5px; font-weight: 600;
+  color: var(--text-2); transform: translateY(-4px); font-variant-numeric: tabular-nums; }
+.stack-chart .xaxis { margin-left: var(--yw); display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+.stack-chart .xaxis span { font-size: 11px; color: var(--muted); padding-top: 6px; text-align: center; white-space: nowrap; overflow: visible; }
+
+.heat { display: flex; flex-direction: column; gap: 3px; }
+.heat .hrow { display: grid; grid-template-columns: 64px repeat(24, minmax(0, 1fr)); gap: 3px; align-items: center; }
+.heat .hlab { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.heat .hc { display: block; height: 20px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line-2); }
+.heat .hc.h1 { background: var(--h1); border-color: transparent; } .heat .hc.h2 { background: var(--h2); border-color: transparent; }
+.heat .hc.h3 { background: var(--h3); border-color: transparent; } .heat .hc.h4 { background: var(--h4); border-color: transparent; }
+.heat .hc.h5 { background: var(--h5); border-color: transparent; } .heat .hc.h6 { background: var(--h6); border-color: transparent; }
+.heat .hc.hot { outline: 2px solid var(--text); outline-offset: 1px; }
+.heat .haxis span { font-size: 10.5px; color: var(--muted); text-align: left; }
+.heat-scale { display: flex; align-items: center; gap: 3px; justify-content: flex-end; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+.heat-scale .hc { width: 16px; height: 10px; }
+.heat-scale span { margin: 0 4px; }
+.chart-tip { white-space: pre-line; line-height: 1.45; }
+@media (max-width: 640px) {
+  .heat .hrow { grid-template-columns: 48px repeat(24, minmax(0, 1fr)); gap: 2px; }
+  .heat .hc { height: 14px; border-radius: 3px; }
+  .stack-chart .plot { height: 170px; }
+  .stack-chart .xaxis span { font-size: 9.5px; }
+}
+
+.list-item .grow.wrap { white-space: normal; }

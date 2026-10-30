@@ -470,6 +470,15 @@ class SiteTest(unittest.TestCase):
         self.assertGreaterEqual(r["days"][-1]["console"], 1)
         self.assertTrue(any(u["user"] == "noc@x" for u in r["top_users"]))
         self.assertTrue(any(b["port"] == 8001 and b["note"] == "KH 1" for b in r["top_bmcs"]))
+        self.assertTrue(any(x["ip"] == "9.9.9.9" for x in r["top_ips"]))
+        self.assertEqual(len(r["heat"]), 7)
+        self.assertGreaterEqual(r["heat"][-1]["hours"][int(time.strftime("%H"))], 1)
+        # 24 gio: theo gio, gio hien tai la cot cuoi
+        r = req(self.port, "GET", "/api/stats?range=24h", None, self.ck)[2]
+        self.assertEqual((r["unit"], len(r["buckets"])), ("hour", 24))
+        self.assertEqual(r["buckets"][-1]["key"], time.strftime("%Y-%m-%dT%H"))
+        self.assertGreaterEqual(r["buckets"][-1]["console"], 1)
+        self.assertEqual(len(req(self.port, "GET", "/api/stats?range=30d", None, self.ck)[2]["buckets"]), 30)
 
     def test_render_guest_router(self):
         from gw_render import expected_routers, render_bmc

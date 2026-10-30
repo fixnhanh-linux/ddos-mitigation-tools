@@ -516,35 +516,64 @@ function phaseTag(s) {
 
 // ------------------------------------------------------------------ Thống kê truy cập (Tổng quan)
 let statsAt = 0;
+let statsRange = "7d";
+try { statsRange = localStorage.getItem("bmcgw.statsRange") || "7d"; } catch { /* mac dinh 7 ngay */ }
+const SERIES = [["web", "Trang BMC"], ["console", "Console"], ["guest", "Khách"]];
+const DOW = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+const dayLabel = (iso) => { const d = new Date(iso.slice(0, 10) + "T00:00:00"); return `${DOW[d.getDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}`; };
+const bucketLabel = (k, unit) => (unit === "hour" ? `${k.slice(11, 13)}:00` : dayLabel(k));
+const bucketTitle = (k, unit) => (unit === "hour" ? `${dayLabel(k)} · ${k.slice(11, 13)}:00–${String((+k.slice(11, 13) + 1) % 24).padStart(2, "0")}:00` : dayLabel(k));
+// truc doc tron: 0 / nua / dinh (1, 2, 5 x 10^n)
+function niceMax(v) {
+  if (v <= 4) return 4;
+  const p = 10 ** Math.floor(Math.log10(v)), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
 async function loadStats(force = false) {
   if (!can("stats")) return;
   if (!force && Date.now() - statsAt < 60000) return;  // doc nhat ky truy cap: toi da 1 lan / phut
   statsAt = Date.now();
-  const s = await api("GET", "stats");
+  const s = await api("GET", `stats?range=${statsRange}`);
   $("#ov-stats").classList.remove("hidden");
-  $("#ov-total").textContent = `${fmtNum(s.total)} lượt · ${s.users} người`;
-  const max = Math.max(1, ...s.days.map((d) => d.web + d.console + d.guest));
-  const DOW = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-  const label = (iso) => { const d = new Date(iso + "T00:00:00"); return `${DOW[d.getDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}`; };
-  // 1 chuoi (tong luot / ngay): cot 1 mau, khong chu thich; rê chuột xem chi tiết từng loại
-  $("#ov-chart").setAttribute("aria-label", "Lượt mở BMC 7 ngày: " + s.days.map((d) => `${label(d.date)} ${d.web + d.console + d.guest}`).join(", "));
-  $("#ov-chart").innerHTML = `<div class="bars">${s.days.map((d) => {
-    const n = d.web + d.console + d.guest;
-    return `<div class="bar-col" tabindex="0" data-tip="${esc(`${label(d.date)}: ${n} lượt · trang BMC ${d.web} · console ${d.console} · khách ${d.guest}`)}">
-      <span class="bar-val">${n || ""}</span><span class="bar" style="height:${n ? Math.max(3, Math.round((n / max) * 100)) : 0}%"></span></div>`;
-  }).join("")}</div><div class="bar-axis">${s.days.map((d) => `<span>${label(d.date)}</span>`).join("")}</div>`;
-  $("#ov-days").innerHTML = s.days.slice().reverse().map((d) => `<tr><td>${label(d.date)}</td><td>${d.web}</td><td>${d.console}</td>
-    <td>${d.guest}</td><td><b>${d.web + d.console + d.guest}</b></td></tr>`).join("");
+  $$("#ov-range button").forEach((b) => b.classList.toggle("on", b.dataset.range === s.range));
+  const RL = { "24h": "24 giờ", "7d": "7 ngày", "30d": "30 ngày" }[s.range];
+  $("#ov-chart-title").textContent = `Lượt mở BMC ${RL}`;
+  $("#ov-user-range").textContent = RL;
+  $("#ov-total").textContent = `${fmtNum(s.total)} lượt · ${s.users} người · ${s.ips} IP` + (s.unit === "hour" ? " · theo giờ" : " · theo ngày");
+  renderStackChart(s);
+  renderHeat(s.heat);
+  const sum = (x) => x.web + x.console + x.guest;
+  $("#ov-days-col").textContent = s.unit === "hour" ? "Giờ" : "Ngày";
+  $("#ov-days").innerHTML = s.buckets.slice().reverse().filter((x) => s.unit !== "hour" || sum(x)).map((x) => `<tr><td>${esc(bucketTitle(x.key, s.unit))}</td>
+    <td>${x.web}</td><td>${x.console}</td><td>${x.guest}</td><td><b>${sum(x)}</b></td></tr>`).join("")
+    || '<tr><td colspan="5" class="hint">Chưa có lượt nào.</td></tr>';
+  const rank = (list, max, row) => list.map((x) => row(x, Math.round((x.count / max) * 100))).join("");
+  const empty = '<div class="list-empty">Chưa có lượt truy cập. Site cần agent bản mới (Site → Cập nhật agent) rồi Áp dụng.</div>';
   const top = Math.max(1, ...s.top_bmcs.map((b) => b.count));
-  $("#ov-top-bmcs").innerHTML = s.top_bmcs.map((b) => `<div class="list-item rank-item">
+  $("#ov-top-bmcs").innerHTML = rank(s.top_bmcs, top, (b, w) => `<div class="list-item rank-item">
       <b class="port">${b.port}</b>
       <span class="grow"><span class="rank-txt" title="${esc((b.note || "") + " · " + siteLabel(b.site))}">${esc(b.note || "—")} <span class="cell-sub">· ${esc(siteLabel(b.site))}</span></span>
-        <span class="rank-bar"><i style="width:${Math.round((b.count / top) * 100)}%"></i></span></span>
-      <b class="num">${fmtNum(b.count)}</b></div>`).join("") || '<div class="list-empty">Chưa có lượt truy cập. Site cần agent bản mới (Site → Cập nhật agent) rồi Áp dụng.</div>';
+        <span class="rank-bar"><i style="width:${w}%"></i></span></span>
+      <b class="num">${fmtNum(b.count)}</b></div>`) || empty;
+  const topIp = Math.max(1, ...s.top_ips.map((x) => x.count));
+  $("#ov-ip-count").textContent = s.ips ? `${s.ips} IP` : "";
+  $("#ov-top-ips").innerHTML = rank(s.top_ips, topIp, (x, w) => `<div class="list-item rank-item">
+      <span class="grow"><span class="rank-txt"><b class="mono">${esc(x.ip)}</b> <span class="cell-sub">· ${x.bmcs} BMC · ${esc(fmtTs(x.last).slice(5, 16))}</span></span>
+        <span class="rank-bar"><i style="width:${w}%"></i></span></span>
+      <b class="num">${fmtNum(x.count)}</b></div>`) || '<div class="list-empty">Chưa có.</div>';
   $("#ov-top-users").innerHTML = s.top_users.map((x) => `<div class="list-item">
       <span class="grow" title="${esc(x.user)}">${esc(x.user)}</span><span class="cell-sub">${x.ips} IP · ${esc(fmtTs(x.last).slice(5, 16))}</span>
       <b class="num">${fmtNum(x.count)}</b></div>`).join("") || '<div class="list-empty">Chưa có.</div>';
+  const topSite = Math.max(1, ...s.by_site.map((x) => x.count));
+  $("#ov-by-site").innerHTML = rank(s.by_site, topSite, (x, w) => `<div class="list-item rank-item">
+      <span class="grow"><span class="rank-txt">${esc(siteLabel(x.site))}</span><span class="rank-bar"><i style="width:${w}%"></i></span></span>
+      <b class="num">${fmtNum(x.count)}</b></div>`) || '<div class="list-empty">Chưa có.</div>';
+  const bl = s.blocked || {};
   const gm = [
+    `<div class="list-item"><span class="sev ${bl.total ? "warn" : "ok"}"></span><span class="grow wrap">${bl.total
+      ? `<a href="#blocked">${fmtNum(bl.total)} lượt bị chặn</a> từ ${fmtNum(bl.ips)} IP${bl.top ? ` · nhiều nhất <span class="mono">${esc(bl.top.ip)}</span> (${fmtNum(bl.top.count)})` : ""}`
+      : "Chưa có lượt bị chặn"}</span><span class="cell-sub">${s.range === "30d" ? "30" : "7"} ngày</span></div>`,
     ...s.maint.map((m) => `<div class="list-item"><span class="sev ${m.status === "active" ? "warn" : "info"}"></span>
       <span class="tag">${esc(siteLabel(m.site))}</span><span class="grow">🔧 ${m.port ? `BMC ${m.port}` : "cả site"} · ${esc(m.note || "bảo trì")}</span>
       <span class="cell-sub mono">${m.status === "active" ? "đến " : ""}${esc(hhmm(m.status === "active" ? m.end : m.start))}</span></div>`),
@@ -552,13 +581,58 @@ async function loadStats(force = false) {
       <span class="grow">Link khách BMC ${g.port}${g.label ? " · " + esc(g.label) : ""}</span>
       <span class="cell-sub">còn ${g.left_minutes >= 120 ? Math.round(g.left_minutes / 60) + " giờ" : g.left_minutes + " phút"}</span></div>`),
   ];
-  $("#ov-guest-maint").innerHTML = gm.join("") || '<div class="list-empty">Không có link khách đang mở hay lịch bảo trì.</div>';
+  if (!s.maint.length && !s.guests.length) gm.push('<div class="list-item"><span class="sev"></span><span class="grow cell-sub">Không có link khách đang mở hay lịch bảo trì.</span></div>');
+  $("#ov-guest-maint").innerHTML = gm.join("");
 }
-// tooltip cho cot bieu do (chuot + ban phim)
+$("#ov-range").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-range]");
+  if (!b || b.dataset.range === statsRange) return;
+  statsRange = b.dataset.range;
+  try { localStorage.setItem("bmcgw.statsRange", statsRange); } catch { /* khong luu duoc thi thoi */ }
+  loadStats(true).catch((err) => toast(err.message, true));
+});
+
+// Cot chong 3 loai luot (trang BMC / console / khach), 1 truc doc, chu thich + bang so lieu + tooltip
+function renderStackChart(s) {
+  const sum = (x) => x.web + x.console + x.guest;
+  const tot = Object.fromEntries(SERIES.map(([k]) => [k, s.buckets.reduce((a, x) => a + x[k], 0)]));
+  $("#ov-legend").innerHTML = SERIES.map(([k, l], i) => `<span class="lg"><i class="sw s${i + 1}"></i>${l} <b>${fmtNum(tot[k])}</b></span>`).join("");
+  const peak = Math.max(0, ...s.buckets.map(sum));
+  const top = niceMax(peak);
+  const n = s.buckets.length;
+  const every = s.unit === "hour" ? 3 : n > 10 ? 5 : 1;  // nhan truc ngang: 24 gio -> moi 3 gio, 30 ngay -> moi 5 ngay
+  const peakIdx = peak ? s.buckets.findIndex((x) => sum(x) === peak) : -1;
+  $("#ov-chart").setAttribute("aria-label", `Lượt mở BMC: ` + s.buckets.filter(sum).map((x) => `${bucketTitle(x.key, s.unit)} ${sum(x)}`).join(", ") || "chưa có");
+  const grid = [top, top / 2, 0].map((v) => `<div class="gl"><span>${fmtNum(Math.round(v))}</span></div>`).join("");
+  const cols = s.buckets.map((x, i) => {
+    const t = sum(x);
+    const segs = SERIES.map(([k], si) => (x[k] ? `<i class="sg s${si + 1}" style="height:${(x[k] / top) * 100}%"></i>` : "")).join("");
+    const tip = `${bucketTitle(x.key, s.unit)}\n${t} lượt` + (t ? `\n` + SERIES.map(([k, l]) => `${l}: ${x[k]}`).join(" · ") : "");
+    return `<div class="col${t ? "" : " zero"}" tabindex="0" data-tip="${esc(tip)}">${i === peakIdx ? `<span class="peak" style="bottom:${(t / top) * 100}%">${t}</span>` : ""}<div class="stack">${segs}</div></div>`;
+  }).join("");
+  const axis = s.buckets.map((x, i) => `<span>${i % every === 0 || (s.unit !== "hour" && i === n - 1) ? esc(bucketLabel(x.key, s.unit)) : ""}</span>`).join("");
+  $("#ov-chart").innerHTML = `<div class="plot"><div class="grid">${grid}</div><div class="cols" style="--n:${n}">${cols}</div></div>
+    <div class="xaxis" style="--n:${n}">${axis}</div>`;
+}
+
+// Ban do nhiet 7 ngay x 24 gio (1 mau, nhat -> dam)
+function renderHeat(heat) {
+  const max = Math.max(0, ...heat.flatMap((d) => d.hours));
+  const step = (v) => (!v ? 0 : Math.min(6, 1 + Math.floor((v / max) * 5.999)));
+  const rows = heat.slice().reverse().map((d) => `<div class="hrow"><span class="hlab">${esc(dayLabel(d.date))}</span>${d.hours.map((v, h) =>
+    `<i class="hc h${step(v)}" tabindex="-1" data-tip="${esc(`${dayLabel(d.date)} · ${String(h).padStart(2, "0")}:00–${String((h + 1) % 24).padStart(2, "0")}:00\n${v} lượt`)}"></i>`).join("")}</div>`).join("");
+  const hours = Array.from({ length: 24 }, (_, h) => `<span>${h % 3 === 0 ? String(h).padStart(2, "0") : ""}</span>`).join("");
+  $("#ov-heat").setAttribute("aria-label", "Lượt mở BMC theo giờ, 7 ngày gần nhất" + (max ? "" : ": chưa có"));
+  $("#ov-heat").innerHTML = `${rows}<div class="hrow haxis"><span class="hlab"></span>${hours}</div>
+    <div class="heat-scale"><span>ít</span>${[1, 2, 3, 4, 5, 6].map((i) => `<i class="hc h${i}"></i>`).join("")}<span>nhiều${max ? ` (${max} lượt/giờ)` : ""}</span></div>`;
+}
+
+// tooltip cho cot bieu do / o ban do nhiet (chuot + ban phim)
 (() => {
   const tip = document.createElement("div");
   tip.className = "chart-tip hidden";
   document.body.appendChild(tip);
+  const SEL = ".stack-chart .col, .heat .hc[data-tip], .bar-col";
   const show = (el) => {
     const r = el.getBoundingClientRect();
     tip.textContent = el.dataset.tip;
@@ -566,11 +640,13 @@ async function loadStats(force = false) {
     const w = tip.offsetWidth;
     tip.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
     tip.style.top = `${r.top + window.scrollY - tip.offsetHeight - 8}px`;
+    el.classList.add("hot");
   };
-  document.addEventListener("mouseover", (e) => { const el = e.target.closest(".bar-col"); if (el) show(el); });
-  document.addEventListener("mouseout", (e) => { if (e.target.closest(".bar-col")) tip.classList.add("hidden"); });
-  document.addEventListener("focusin", (e) => { const el = e.target.closest(".bar-col"); if (el) show(el); });
-  document.addEventListener("focusout", () => tip.classList.add("hidden"));
+  const hide = (el) => { tip.classList.add("hidden"); if (el) el.classList.remove("hot"); };
+  document.addEventListener("mouseover", (e) => { const el = e.target.closest(SEL); if (el) show(el); });
+  document.addEventListener("mouseout", (e) => { const el = e.target.closest(SEL); if (el) hide(el); });
+  document.addEventListener("focusin", (e) => { const el = e.target.closest(SEL); if (el) show(el); });
+  document.addEventListener("focusout", (e) => hide(e.target.closest && e.target.closest(SEL)));
 })();
 
 function renderOverview() {

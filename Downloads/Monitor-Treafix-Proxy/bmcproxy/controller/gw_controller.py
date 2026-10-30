@@ -882,45 +882,82 @@ class App:
         return [k for k in sorted(self.store.sites) if self.can_view(u, k)]
 
     # ------------------------------------------------------------ thong ke Tong quan
-    def stats(self, u, days=7):
+    def stats(self, u, rng="7d"):
+        """Thong ke luot mo BMC cho Tong quan.
+        rng: 24h (theo gio) / 7d / 30d (theo ngay). heat: 7 ngay x 24 gio. Luot = 1 nguoi + IP + BMC / 30 phut."""
         st = self.store
-        today = dt.date.today()
-        dates = [(today - dt.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
-        by_day = {d: {"date": d, "web": 0, "console": 0, "guest": 0} for d in dates}
-        bmc_n, user_n = {}, {}
-        for r in st.read_access(8000):
-            d = str(r.get("ts", ""))[:10]
-            if d < dates[0]:
+        now = dt.datetime.now()
+        if rng == "24h":
+            first = (now - dt.timedelta(hours=23)).replace(minute=0, second=0, microsecond=0)
+            keys = [(first + dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H") for i in range(24)]
+            klen = 13
+        else:
+            days = 30 if rng == "30d" else 7
+            rng = f"{days}d"
+            keys = [(now.date() - dt.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+            klen = 10
+        buckets = {k: {"key": k, "web": 0, "console": 0, "guest": 0} for k in keys}
+        heat_days = [(now.date() - dt.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+        heat = {d: [0] * 24 for d in heat_days}
+        since = min(keys[0][:10], heat_days[0])
+        bmc_n, user_n, ip_n, site_n = {}, {}, {}, {}
+        for r in st.read_access(40000 if rng == "30d" else 12000):
+            ts = str(r.get("ts", ""))
+            if ts[:10] < since or not self.can_view(u, r.get("site", "")):
                 continue
-            if d not in by_day or not self.can_view(u, r.get("site", "")):
-                continue
-            guest = r.get("kind") == "guest-open" or str(r.get("user", "")).startswith("khách")
             if r.get("kind") == "guest-open":
                 continue  # lan mo link: da dem o lan vao trang ngay sau
-            by_day[d]["guest" if guest else "console" if r.get("kind") == "console" else "web"] += 1
+            guest = str(r.get("user", "")).startswith("khách")
+            kind = "guest" if guest else "console" if r.get("kind") == "console" else "web"
+            if ts[:10] in heat and len(ts) >= 13 and ts[11:13].isdigit():
+                heat[ts[:10]][int(ts[11:13])] += 1
+            b = buckets.get(ts[:klen])
+            if b is None:
+                continue
+            b[kind] += 1
             k = (r.get("site"), r.get("port"))
-            b = bmc_n.setdefault(k, {"site": k[0], "port": k[1], "count": 0, "last": ""})
-            b["count"] += 1
-            b["last"] = max(b["last"], str(r.get("ts", "")))
+            x = bmc_n.setdefault(k, {"site": k[0], "port": k[1], "count": 0, "last": ""})
+            x["count"] += 1
+            x["last"] = max(x["last"], ts)
+            site_n[k[0]] = site_n.get(k[0], 0) + 1
+            ip = str(r.get("ip", "")) or "?"
+            y = ip_n.setdefault(ip, {"ip": ip, "count": 0, "last": "", "bmcs": set()})
+            y["count"] += 1
+            y["last"] = max(y["last"], ts)
+            y["bmcs"].add(k)
             if not guest:
                 who = str(r.get("user", "")) or "(không rõ)"
-                x = user_n.setdefault(who, {"user": who, "count": 0, "last": "", "ips": set()})
-                x["count"] += 1
-                x["last"] = max(x["last"], str(r.get("ts", "")))
-                x["ips"].add(r.get("ip", ""))
+                z = user_n.setdefault(who, {"user": who, "count": 0, "last": "", "ips": set()})
+                z["count"] += 1
+                z["last"] = max(z["last"], ts)
+                z["ips"].add(ip)
         notes = {(b["site"], b["port"]): b.get("note", "") for b in st.bmcs}
-        top_bmcs = sorted(bmc_n.values(), key=lambda x: (-x["count"], x["port"]))[:6]
+        top_bmcs = sorted(bmc_n.values(), key=lambda x: (-x["count"], x["port"]))[:8]
         for b in top_bmcs:
             b["note"] = notes.get((b["site"], b["port"]), "")
-        top_users = [{**x, "ips": len(x["ips"])} for x in sorted(user_n.values(), key=lambda x: -x["count"])[:6]]
-        now = time.time()
+        top_users = [{**x, "ips": len(x["ips"])} for x in sorted(user_n.values(), key=lambda x: -x["count"])[:8]]
+        top_ips = [{**x, "bmcs": len(x["bmcs"])} for x in sorted(ip_n.values(), key=lambda x: -x["count"])[:8]]
+        blocked = {"total": 0, "ips": 0, "top": None}
+        if self.can(u, "stats"):
+            agg = {}
+            for r in st.read_denied(limit=20000, days=7 if rng != "30d" else 30):
+                if self.can_view(u, r.get("site", "")):
+                    agg[r.get("ip", "")] = agg.get(r.get("ip", ""), 0) + int(r.get("count") or 1)
+            if agg:
+                ip, n = max(agg.items(), key=lambda x: x[1])
+                blocked = {"total": sum(agg.values()), "ips": len(agg), "top": {"ip": ip, "count": n}}
+        now_ts = time.time()
         guests = [self.guest_view(i, g) for i, g in st.guests.items()
-                  if self.can_view(u, g["site"]) and not g.get("revoked") and g["exp"] > now]
+                  if self.can_view(u, g["site"]) and not g.get("revoked") and g["exp"] > now_ts]
         maint = [self.maint_view(i, m) for i, m in st.maint.items() if self.can_view(u, m["site"])]
         maint = sorted((m for m in maint if m["status"] != "done"), key=lambda m: (m["status"] != "active", m["start"]))[:5]
-        days_list = [by_day[d] for d in dates]
-        return {"days": days_list, "total": sum(x["web"] + x["console"] + x["guest"] for x in days_list),
-                "users": len(user_n), "top_bmcs": top_bmcs, "top_users": top_users,
+        rows = [buckets[k] for k in keys]
+        return {"range": rng, "unit": "hour" if klen == 13 else "day", "buckets": rows,
+                "days": [{**x, "date": x["key"]} for x in rows] if klen == 10 else [],
+                "total": sum(x["web"] + x["console"] + x["guest"] for x in rows),
+                "users": len(user_n), "ips": len(ip_n), "top_bmcs": top_bmcs, "top_users": top_users, "top_ips": top_ips,
+                "by_site": sorted(({"site": k, "count": v} for k, v in site_n.items()), key=lambda x: -x["count"]),
+                "heat": [{"date": d, "hours": heat[d]} for d in heat_days], "blocked": blocked,
                 "guests": sorted(guests, key=lambda g: g["expires"])[:5], "guests_active": len(guests), "maint": maint}
 
     # ------------------------------------------------------------ cong khach hang
@@ -2110,7 +2147,7 @@ def make_handler(app):
                 return self.api_iprules(method, a1, u)
             if res == "stats" and method == "GET":
                 app.need(u, "stats")
-                return self.send(200, app.stats(u))
+                return self.send(200, app.stats(u, (self.query.get("range") or ["7d"])[0]))
             if res == "access" and method == "GET":
                 app.need(u, "stats")
                 site = (self.query.get("site") or [""])[0]

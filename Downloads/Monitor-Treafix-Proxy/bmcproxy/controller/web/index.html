@@ -128,21 +128,39 @@
       <div class="site-strip" id="ov-sites"></div>
       <div class="stats-block hidden" id="ov-stats">
         <div class="panel ov-chart-panel">
-          <div class="panel-head"><h2>Lượt mở BMC 7 ngày</h2><span class="hint" id="ov-total"></span></div>
-          <div id="ov-chart" class="bar-chart" role="img"></div>
+          <div class="panel-head chart-head">
+            <div><h2 id="ov-chart-title">Lượt mở BMC</h2><div class="hint" id="ov-total"></div></div>
+            <div class="seg" id="ov-range" role="group" aria-label="Khoảng thời gian">
+              <button type="button" data-range="24h">24 giờ</button><button type="button" data-range="7d">7 ngày</button><button type="button" data-range="30d">30 ngày</button>
+            </div>
+          </div>
+          <div class="chart-legend" id="ov-legend"></div>
+          <div id="ov-chart" class="stack-chart" role="img"></div>
           <details class="mt"><summary class="hint">Xem bảng số liệu</summary><div class="table-wrap"><table class="table"><thead>
-            <tr><th>Ngày</th><th>Trang BMC</th><th>Console</th><th>Khách</th><th>Tổng</th></tr></thead><tbody id="ov-days"></tbody></table></div></details>
+            <tr><th id="ov-days-col">Ngày</th><th>Trang BMC</th><th>Console</th><th>Khách</th><th>Tổng</th></tr></thead><tbody id="ov-days"></tbody></table></div></details>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>BMC mở nhiều nhất</h2><a href="#access" class="link">Truy cập BMC</a></div>
           <div id="ov-top-bmcs" class="list"></div>
         </div>
+        <div class="panel ov-heat-panel">
+          <div class="panel-head"><h2>Theo giờ trong ngày</h2><span class="hint">7 ngày gần nhất · số lượt mỗi giờ</span></div>
+          <div id="ov-heat" class="heat" role="img"></div>
+        </div>
         <div class="panel">
-          <div class="panel-head"><h2>Người dùng hoạt động</h2><span class="hint">7 ngày</span></div>
+          <div class="panel-head"><h2>IP truy cập nhiều nhất</h2><span class="hint" id="ov-ip-count"></span></div>
+          <div id="ov-top-ips" class="list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Người dùng hoạt động</h2><span class="hint" id="ov-user-range"></span></div>
           <div id="ov-top-users" class="list"></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><h2>Link khách · bảo trì</h2></div>
+          <div class="panel-head"><h2>Theo site</h2><span class="hint">lượt mở BMC</span></div>
+          <div id="ov-by-site" class="list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Bảo vệ · link khách · bảo trì</h2><a href="#blocked" class="link">Chặn IP</a></div>
           <div id="ov-guest-maint" class="list"></div>
         </div>
       </div>
